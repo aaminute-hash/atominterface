@@ -1,0 +1,84 @@
+[project]
+name = "atominterface"
+version = "0.1.0"
+description = "Reliable interface modeling for AI4S: coherent interface builder + uMLIP guard layer + thermodynamic profiler."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "AtomInterface contributors"}
+]
+keywords = ["materials-science", "interface", "mlip", "ase", "pymatgen", "active-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "numpy>=1.21",
+    "ase>=3.22",
+    "typer>=0.9",
+    "pydantic>=1.10,<3",
+]
+
+[project.optional-dependencies]
+pymatgen = ["pymatgen>=2023.0"]
+mace = ["mace-torch"]
+chgnet = ["chgnet"]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "ruff>=0.1",
+    "mypy>=1.0",
+    "pyyaml",
+]
+all = ["atominterface[pymatgen,mace,chgnet,dev]"]
+
+[project.scripts]
+atominterface = "atominterface.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["atominterface*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "B", "PL", "UP", "SIM", "TCH"]
+ignore = [
+    "E501",
+    "PLR0913",
+    "PLR2004",
+    # R/F/S matrices are conventional in mechanics tests
+    "N806",
+    "N807",
+    "N816",
+    # examples/backends use lazy imports by design (optional deps)
+    "PLC0415",
+    # 2-arg super() is fine in our wrapper classes
+    "UP008",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -v"
+markers = [
+    "slow: long-running tests",
+    "needs_pymatgen: requires pymatgen",
+    "needs_gpu: requires a CUDA-capable device",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
