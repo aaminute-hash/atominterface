@@ -21,6 +21,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import inspect
 import sys
 import warnings
 from pathlib import Path
@@ -35,6 +36,19 @@ try:
     from ase.io import write as ase_write
 except Exception as exc:  # pragma: no cover
     sys.exit(f"[quickstart] ASE is required: {exc}")
+
+
+def _call_compat(func, *args, **kwargs):
+    """Call ``func`` passing only the keyword arguments its signature accepts.
+
+    pymatgen's interface API has changed between releases (``label_index``
+    appeared on ``CoherentInterfaceBuilder`` only in later versions), and this
+    quickstart is meant to run against whatever version the user installed.
+    """
+    params = inspect.signature(func).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return func(*args, **kwargs)
+    return func(*args, **{k: v for k, v in kwargs.items() if k in params})
 
 
 def make_bulks():
@@ -79,7 +93,8 @@ def build_coherent_interfaces(
         max_angle_tol=0.02,
     )
 
-    builder = CoherentInterfaceBuilder(
+    builder = _call_compat(
+        CoherentInterfaceBuilder,
         substrate_structure=sub,
         film_structure=film,
         substrate_miller=substrate_miller,
@@ -104,7 +119,7 @@ def build_coherent_interfaces(
             continue
 
         for iface in interfaces:
-            atoms = AseAtomsAdaptor.get_atoms(iface, msonable=False)
+            atoms = _call_compat(AseAtomsAdaptor.get_atoms, iface, msonable=False)
             props = getattr(iface, "interface_properties", {}) or {}
             strain = props.get("strain")
             von_mises = props.get("von_mises")
