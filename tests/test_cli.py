@@ -11,8 +11,20 @@ runner = CliRunner()
 
 
 def _combined_output(result) -> str:
-    """Click 8.2 split stderr out of ``output``; join whatever is available."""
-    return (getattr(result, "output", "") or "") + (getattr(result, "stderr", "") or "")
+    """Join stdout with stderr across Click generations.
+
+    Click >= 8.2 captures stderr separately, so ``result.output`` only
+    holds stdout.  Click < 8.2 mixes both into ``result.output`` and makes
+    ``result.stderr`` *raise* ``ValueError("stderr not separately
+    captured")`` -- an attribute that exists but explodes, which is why a
+    plain ``getattr`` default does not help.
+    """
+    output = result.output or ""
+    try:
+        stderr = result.stderr or ""
+    except ValueError:
+        stderr = ""
+    return output + stderr
 
 
 def test_version_flag_prints_version() -> None:
