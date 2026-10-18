@@ -21,10 +21,12 @@ from .watchers import ForceNormWatcher, NeighborWatcher, WatchResult
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ase.atoms import Atoms
+
 
 @dataclass
 class RelaxResult:
-    atoms: Atoms  # noqa: F821
+    atoms: Atoms
     n_steps: int = 0
     converged: bool = False
     ood_triggered: bool = False
@@ -56,7 +58,7 @@ class GuardedRelaxer:
         self.fmax = fmax
         self.max_steps = max_steps
         self.ood_threshold = ood_threshold
-        self.watchers = (
+        self.watchers: list[Callable[..., WatchResult]] = (
             list(watchers)
             if watchers is not None
             else [
@@ -122,26 +124,24 @@ class GuardedRelaxer:
         if hasattr(base, "get_forces") and callable(base.get_forces):
             calc = base
         # Case 2: base is a class
-        elif isinstance(base, type):
-            try:
-                calc = base(atoms)
-            except TypeError:
-                calc = base()
-        # Case 3: base is a callable (factory function)
-        elif callable(base):
+        elif isinstance(base, type) or callable(base):
             try:
                 calc = base(atoms)
             except TypeError:
                 calc = base()
         # Case 4: base is a string or other
         else:
+
             class _DummyCalc:
                 def __init__(self, a):
                     self.atoms = a
+
                 def get_forces(self, a=None):
                     return np.zeros((len(self.atoms), 3))
+
                 def get_potential_energy(self, a=None):
                     return 0.0
+
             calc = _DummyCalc(atoms)
 
         atoms.calc = calc

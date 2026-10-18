@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 
+# NumPy 2.0 renamed ``trapz`` to ``trapezoid``.  Both names are still in
+# circulation depending on the installed NumPy, so resolve once at import
+# time to stay compatible with the full ``numpy>=1.21`` support range.
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
+
 
 def interface_energy(
     *,
@@ -59,8 +64,8 @@ def fit_cohesive_zone(
     if 0 < imax < len(trac) - 1:
         # Fit ascending and descending segments with least-squares lines,
         # then intersect them.  Exact for piecewise-linear (bilinear) CZM.
-        asc_x = disp[:imax + 1]
-        asc_y = trac[:imax + 1]
+        asc_x = disp[: imax + 1]
+        asc_y = trac[: imax + 1]
         desc_x = disp[imax:]
         desc_y = trac[imax:]
         a1, b1 = np.polyfit(asc_x, asc_y, 1)
@@ -78,7 +83,7 @@ def fit_cohesive_zone(
         y_peak = float(trac[imax])
     sigma_max = y_peak
     delta_c = x_peak
-    G_c = float(np.trapezoid(trac, disp))
+    G_c = float(_trapezoid(trac, disp))
     return {
         "max_traction": sigma_max,
         "critical_separation": delta_c,

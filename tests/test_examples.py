@@ -21,6 +21,7 @@ def test_example_01_runs_with_dummy(tmp_path):
         text=True,
         env=env,
         timeout=300,
+        check=False,
     )
     # The script may exit non-zero if pymatgen is absent (graceful message),
     # or succeed if present.  In either case it must not import-crash.
