@@ -20,11 +20,28 @@ from atominterface.relax.watchers import (
     NeighborWatcher,
 )
 
+_GRID = np.stack(np.meshgrid([2.5, 5.0, 7.5], [2.5, 5.0, 7.5], [2.5, 5.0, 7.5]), axis=-1).reshape(
+    -1, 3
+)
 
-def make_atoms(n=5, cell=None):
+
+def make_atoms(n=5, cell=None, seed: int = 7):
+    """Well-separated atoms with reproducible positions.
+
+    Positions used to come from an unseeded ``np.random.rand``. With six
+    atoms in an 8 A box, two of them occasionally land closer than the
+    0.6 A overlap threshold that `NeighborWatcher` uses, so
+    `test_neighbor_watcher_passes_normal` failed roughly one CI run in
+    twenty for no reason.  Picking distinct points off a 2.5 A grid
+    (plus a small seeded jitter) keeps the input varied while making the
+    minimum separation a property of the fixture rather than of luck.
+    """
     if cell is None:
         cell = np.eye(3) * 10.0
-    return Atoms(numbers=[6] * n, positions=np.random.rand(n, 3) * 8 + 1, cell=cell, pbc=True)
+    rng = np.random.default_rng(seed)
+    picks = rng.choice(len(_GRID), size=n, replace=False)
+    positions = _GRID[picks] + rng.normal(0.0, 0.2, (n, 3))
+    return Atoms(numbers=[6] * n, positions=positions, cell=cell, pbc=True)
 
 
 def dummy_calc_factory():
