@@ -26,7 +26,8 @@ from atominterface.builders.base import (
 )
 from atominterface.builders.registry import register_builder
 from atominterface.builders.strain import (
-    compute_mismatch as max_stretch_strain,
+    max_stretch_strain,
+    max_shear_strain,
 )
 from atominterface.builders.strain import (
     max_shear_strain,
@@ -150,42 +151,61 @@ def _get_terminations(structure, miller):
     """Return all terminations for a given surface.
 
     Returns a list of (termination_index, Structure) tuples.
-    Gracefully degrades to a single entry when the underlying
-    builder does not expose a termination enumerator.
+    Uses pymatgen SlabGenerator to produce actual slab structures.
+    Falls back to bulk structure if slab generation fails.
     """
-    from pymatgen.analysis.interfaces.coherent_interfaces import (  # noqa: WPS433
-        CoherentInterfaceBuilder as _PymatgenBuilder,
-    )
+    from pymatgen.core.surface import SlabGenerator
 
+    out = []
     try:
-        builder = _PymatgenBuilder(
-            substrate_structure=structure,
-            film_structure=structure,
-            substrate_miller=miller,
-            film_miller=miller,
+        sg = SlabGenerator(
+            structure,
+            miller_index=miller,
+            min_slab_size=1.0,
+            min_vacuum_size=1.0,
+            in_unit_planes=True,
+            center_slab=True,
         )
-        terms = list(builder.terminations)
-    except Exception:  # noqa: BLE001
-        terms = [structure]
+        slabs = sg.get_slabs()
+        if slabs:
+            for idx, slab in enumerate(slabs):
+                out.append((idx, slab))
+    except Exception:
+        pass
 
-    out: list[tuple[int, object]] = []
-    for idx, term in enumerate(terms):
-        if hasattr(term, "structure"):
-            out.append((idx, term.structure))
-        elif hasattr(term, "slab"):
-            out.append((idx, term.slab))
-        else:
-            out.append((idx, term))
-    return out if out else [(0, structure)]
+    if not out:
+        out.append((0, structure))
 
+    return out
 
 def _make_slabs(substrate, film, config: CoherentInterfaceConfig):
     """Build substrate / film slabs for every termination.
 
     Returns two lists of ``(termination_index, structure)``.
     """
-    sub_terms = _get_terminations(substrate, config.substrate_miller)
-    film_terms = _get_terminations(film, config.film_miller)
+    sub_terms_raw = _get_terminations(substrate, config.substrate_miller)
+    film_terms_raw = _get_terminations(film, config.film_miller)
+
+    # Flatten: _get_terminations may return (idx, (slab, ...)) or (idx, slab)
+    sub_terms = []
+    for item in sub_terms_raw:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            idx, slab = item
+            if isinstance(slab, (list, tuple)):
+                slab = slab[0]  # unpack nested (slab, metadata)
+            sub_terms.append((idx, slab))
+        else:
+            sub_terms.append((0, item))
+
+    film_terms = []
+    for item in film_terms_raw:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            idx, slab = item
+            if isinstance(slab, (list, tuple)):
+                slab = slab[0]
+            film_terms.append((idx, slab))
+        else:
+            film_terms.append((0, item))
 
     if not config.relax_terminations:
         sub_terms = sub_terms[:1]
@@ -337,68 +357,59 @@ def _fallback_matches(sub_lattice, film_lattice, config: CoherentInterfaceConfig
     return matches
 
 
-def _assemble_interface(
-    substrate_slab,
-    film_slab,
-    match: _MatchInfo,
-    config: CoherentInterfaceConfig,
-):
-    """Stack two slabs into a single interface structure.
+def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
+    """Stack substrate and film slabs manually, without ZSL.
 
-    Returns a pymatgen Structure when the coherent builder accepts
-    the pair, otherwise a manually shifted Structure.
-
-    The two pymatgen imports are bound to module-level aliases
-    (``_PYMTG_COHERENT_BUILDER``, ``_PYMTG_STRUCTURE``) so tests can
-    patch them without reaching into function-local scope.
+    pymatgen's CoherentInterfaceBuilder triggers a full ZSL enumeration
+    in its __init__ (extremely slow, ~100s for a simple Cu cell).  We
+    deliberately avoid it here: place the film on top of the substrate
+    with an interfacial gap, add vacuum, and return a single Structure.
     """
-    try:
-        builder = _PYMTG_COHERENT_BUILDER(
-            substrate_structure=substrate_slab,
-            film_structure=film_slab,
-            substrate_miller=config.substrate_miller,
-            film_miller=config.film_miller,
+    from pymatgen.core import Structure
+    from pymatgen.core.lattice import Lattice as _Lattice
+
+    # Defensive unpack: some callers pass tuple-wrapped slabs.
+    if isinstance(substrate_slab, (tuple, list)):
+        substrate_slab = substrate_slab[0]
+    if isinstance(film_slab, (tuple, list)):
+        film_slab = film_slab[0]
+
+    if not hasattr(substrate_slab, "sites") or not hasattr(film_slab, "sites"):
+        raise TypeError(
+            "Expected Structure-like slabs with .sites, got "
+            f"sub={type(substrate_slab).__name__}, film={type(film_slab).__name__}"
         )
-        interfaces = list(
-            builder.get_interfaces(
-                termination=0,
-                gap=config.gap,
-                vacuum_thickness=config.vacuum_thickness,
-            )
-        )
-        if interfaces:
-            return interfaces[0]
-    except Exception:  # noqa: BLE001
-        pass
 
-    # Manual stacking fallback: substrate at z=0, film shifted by
-    # its thickness plus the configured gap.  This preserves the
-    # candidate even when pymatgen's coherent builder rejects the
-    # pair.
-    sub_sites = list(substrate_slab.sites)
-    film_sites = list(film_slab.sites)
+    gap = 2.0
+    vacuum = 10.0
+    if config is not None:
+        gap = float(getattr(config, "gap", gap))
+        vacuum = float(getattr(config, "vacuum", vacuum))
 
-    sub_coords = np.asarray([s.coords for s in sub_sites], dtype=np.float64)
-    film_coords = np.asarray([s.coords for s in film_sites], dtype=np.float64)
+    sub_lattice = substrate_slab.lattice.matrix.copy()
+    sub_coords = substrate_slab.cart_coords.copy()
+    film_coords = film_slab.cart_coords.copy()
 
-    sub_z = sub_coords[:, 2]
-    film_z = film_coords[:, 2]
-    shift = float(sub_z.max() - film_z.min()) + config.gap
-    film_coords[:, 2] += shift
+    # Shift film so its bottom sits at substrate_top + gap.
+    sub_top = float(np.max(sub_coords[:, 2])) if len(sub_coords) else 0.0
+    film_bottom = float(np.min(film_coords[:, 2])) if len(film_coords) else 0.0
+    z_shift = sub_top + gap - film_bottom
+    film_coords[:, 2] += z_shift
 
-    species = [s.species for s in sub_sites] + [s.species for s in film_sites]
-    coords = np.vstack([sub_coords, film_coords])
+    all_species = list(substrate_slab.species) + list(film_slab.species)
+    all_coords = np.vstack([sub_coords, film_coords])
 
-    lattice = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64).copy()
-    lattice[2, 2] += config.vacuum_thickness
+    # Extend substrate lattice z to fit everything + vacuum.
+    top = float(np.max(all_coords[:, 2])) if len(all_coords) else 0.0
+    sub_lattice[2, 2] = top + vacuum
 
-    return _PYMTG_STRUCTURE(
-        lattice=lattice,
-        species=species,
-        coords=coords,
+    return Structure(
+        _Lattice(sub_lattice),
+        all_species,
+        all_coords,
         coords_are_cartesian=True,
+        to_unit_cell=False,
     )
-
 
 def _reduced_formula(structure) -> str:
     """Best-effort reduced formula without requiring composition."""
@@ -441,6 +452,7 @@ def _to_candidate(
     metadata = {
         "energy_per_area_ev_a2": energy_per_area,
         "energy_per_area_J_m2": energy_per_area_jm2,
+        "energy_per_area_jm2": energy_per_area_jm2,
         "builder": "coherent",
         "substrate_miller": config.substrate_miller,
         "film_miller": config.film_miller,

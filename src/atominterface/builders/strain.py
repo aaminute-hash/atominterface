@@ -1,118 +1,110 @@
-"""Strain / lattice-mismatch helpers.
-
-These are deliberately geometry-only routines: no database lookups,
-no models.  They exist so the builder can reject candidates **before**
-spending seconds on structure generation.
-
-pymatgen is treated as an optional dependency: it is imported lazily
-so the builder package stays importable in minimal CI environments,
-but every public routine here is typed against its Lattice because
-the strain math is meaningless without a proper periodicity object.
-"""
+"""Strain computation for interface matching."""
 
 from __future__ import annotations
 
 import numpy as np
 
-# Sentinel used for type annotations; the real class is resolved at
-# runtime by :func:`_lattice_cls` so we never pay the import cost at
-# module load time.
-Lattice = None  # type: ignore  # noqa: F811  # re-export for typing
+_LATTICE_CLS = None
+
+def _lattice_cls():
+    global _LATTICE_CLS
+    if _LATTICE_CLS is None:
+        try:
+            from pymatgen.core.lattice import Lattice
+            _LATTICE_CLS = Lattice
+        except ImportError:
+            _LATTICE_CLS = False
+    return _LATTICE_CLS
 
 
-def _lattice_cls():  # noqa: F811
-    """Return the pymatgen Lattice class, importing it on first use."""
+def _as_pymatgen_lattice(matrix):
+    Lattice = _lattice_cls()
+    if not Lattice:
+        raise ImportError("pymatgen not available")
+    arr = np.asarray(matrix, dtype=float)
+    if arr.shape == (3, 3):
+        return Lattice(arr)
+    elif arr.shape == (2, 2):
+        m = np.eye(3)
+        m[:2, :2] = arr
+        return Lattice(m)
+    elif arr.shape == (2, 3):
+        m = np.eye(3)
+        m[0, :2] = arr[0, :2]
+        m[1, :2] = arr[1, :2]
+        if arr.shape[1] == 3:
+            m[0, 2] = arr[0, 2]
+            m[1, 2] = arr[1, 2]
+        return Lattice(m)
+    else:
+        raise ValueError(f"Cannot convert shape {arr.shape} to Lattice")
+
+
+def _to_matrix(obj):
+    """Extract 3x3 matrix from Lattice object, array, or list."""
+    if hasattr(obj, 'matrix'):
+        return np.asarray(obj.matrix, dtype=float)
+    elif hasattr(obj, 'a') and hasattr(obj, 'b') and hasattr(obj, 'c'):
+        # pymatgen Lattice-like duck type
+        return np.array([obj.a, obj.b, obj.c], dtype=float)
+    else:
+        return np.asarray(obj, dtype=float)
+
+
+def compute_mismatch(lat_sub, lat_film):
+    """Compute tensile and shear strain between two lattices."""
+    sub = _to_matrix(lat_sub)
+    film = _to_matrix(lat_film)
     try:
-        from pymatgen.core.lattice import Lattice as _L  # noqa: N811, WPS433
-    except ImportError:  # pragma: no cover - optional dependency
-        raise ImportError(
-            "pymatgen is required for strain calculations. "
-            "Install it with: pip install 'atominterface[pymatgen]'"
-        )
-    return _L
+        F = film @ np.linalg.inv(sub)
+    except np.linalg.LinAlgError:
+        return {
+            "tensile": float("inf"),
+            "shear": float("inf"),
+            "von_mises": float("inf"),
+            "strain_tensor": np.full((3, 3), float("inf")),
+        }
+    E = 0.5 * (F.T @ F - np.eye(3))
+    tensile = np.trace(E) / 3.0
+    dev = E - tensile * np.eye(3)
+    shear = np.sqrt(2.0 / 3.0 * np.trace(dev @ dev))
+    von_mises = np.sqrt(3.0 / 2.0 * np.trace(dev @ dev))
+    return {
+        "tensile": float(tensile),
+        "shear": float(shear),
+        "von_mises": float(von_mises),
+        "strain_tensor": E,
+    }
 
 
-def _normalize(obj):
-    """Accept a pymatgen Lattice or a raw 3x3 / 2x2 / 2x3 array.
-
-    The returned object is always a pymatgen Lattice, which guarantees
-    that downstream code can safely access ``.matrix`` and ``.abc``.
-    """
-    _L = _lattice_cls()
-    if isinstance(obj, _L):
-        return obj
-    arr = np.asarray(obj, dtype=np.float64)
-    if arr.shape == (2, 2):
-        # In-plane 2x2 slice -> pad a unit vacuum vector along z.
-        mat = np.eye(3, dtype=np.float64)
-        mat[:2, :2] = arr
-        return _L(mat)
-    if arr.shape == (2, 3):
-        # Two in-plane vectors already carrying a z component.
-        mat = np.eye(3, dtype=np.float64)
-        mat[:2, :] = arr
-        return _L(mat)
-    return _L(arr)
+def max_shear_strain(lat_sub, lat_film):
+    """Return the maximum shear strain between two lattices."""
+    result = compute_mismatch(lat_sub, lat_film)
+    return result["shear"]
 
 
-def compute_mismatch(
-    lattice_a,
-    lattice_b,
-    direction: tuple[int, int, int] = (0, 0, 1),
-) -> float:
-    """Volumetric mismatch between two lattices along ``direction``.
-
-    Uses the 2D in-plane lattice vectors normal to ``direction``,
-    following the usual definition:
-
-        mismatch = 2 * |a - b| / (a + b)
-
-    Returns the **maximum** mismatch among the two in-plane vectors,
-    which is the conservative quantity for interface stability.
-    """
-    lattice_a = _normalize(lattice_a)
-    lattice_b = _normalize(lattice_b)
-
-    a = np.array(lattice_a.abc, dtype=float)
-    b = np.array(lattice_b.abc, dtype=float)
-    idx = [i for i in range(3) if i != _normal_axis(direction)]
-    mismatches = [2.0 * abs(a[i] - b[i]) / (a[i] + b[i] + 1e-12) for i in idx]
-    return float(max(mismatches))
+def max_stretch_strain(lat_sub, lat_film):
+    """Return the maximum stretch (tensile) strain between two lattices."""
+    result = compute_mismatch(lat_sub, lat_film)
+    return abs(result["tensile"])
 
 
-def max_shear_strain(
-    lattice_a,
-    lattice_b,
-    direction: tuple[int, int, int] = (0, 0, 1),
-) -> float:
-    """Shear-strain proxy from the angle between in-plane vectors.
-
-    Large shear is what makes an interface relax into a mess even
-    when the length mismatch looks small.  Returned in radians.
-    """
-    a1, a2 = _inplane_vectors(lattice_a, direction)
-    b1, b2 = _inplane_vectors(lattice_b, direction)
-    ca = _cos_angle(a1, b1)
-    cb = _cos_angle(a2, b2)
-    # Angle deviation from ideal registry; clip to avoid acos(>1).
-    dev = float(np.arccos(min(max(ca, -1.0), 1.0)) + np.arccos(min(max(cb, -1.0), 1.0)))
-    return dev
+def compute_area(vec_a, vec_b):
+    """Compute area of parallelogram spanned by two vectors."""
+    return float(np.linalg.norm(np.cross(np.asarray(vec_a), np.asarray(vec_b))))
 
 
-def _normal_axis(direction: tuple[int, int, int]) -> int:
-    for i, v in enumerate(direction):
-        if v != 0:
-            return i
-    raise ValueError("direction must be a non-zero Miller index")
-
-
-def _inplane_vectors(lattice, direction: tuple[int, int, int]) -> tuple:
-    m = np.array(_normalize(lattice).matrix, dtype=float)
-    basis = [m[i] for i in range(3) if i != _normal_axis(direction)]
-    return tuple(basis)
-
-
-def _cos_angle(u: np.ndarray, v: np.ndarray) -> float:
-    un = u / (np.linalg.norm(u) + 1e-12)
-    vn = v / (np.linalg.norm(v) + 1e-12)
-    return float(np.dot(un, vn))
+def strain_filter(candidates, max_strain=0.05):
+    """Filter candidate interfaces by maximum allowed strain."""
+    filtered = []
+    for c in candidates:
+        if hasattr(c, 'strain') and c.strain is not None:
+            if isinstance(c.strain, dict):
+                if c.strain.get("von_mises", 0) <= max_strain:
+                    filtered.append(c)
+            else:
+                if float(c.strain) <= max_strain:
+                    filtered.append(c)
+        else:
+            filtered.append(c)
+    return filtered

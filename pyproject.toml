@@ -76,7 +76,12 @@ markers = [
     "needs_pymatgen: requires pymatgen",
     "needs_gpu: requires a CUDA-capable device",
 ]
-
+filterwarnings = [
+    "ignore::DeprecationWarning:matplotlib.*",
+    "ignore::DeprecationWarning:spglib.*",
+    "ignore::DeprecationWarning:pymatgen.*",
+    "ignore::UserWarning",
+]
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true

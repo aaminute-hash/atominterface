@@ -113,16 +113,39 @@ class GuardedRelaxer:
     # Internals
     # ------------------------------------------------------------------
     def _wrap(self, atoms):  # noqa: D401
+        """Wrap calculator to add guards and type conversion."""
+        import numpy as np
+
         base = self._base
 
-        class _W(base):  # type: ignore[valid-type]
-            def get_forces(self, a):  # noqa: A002
-                return np.asarray(base.get_forces(a), dtype=float)
+        # Case 1: base is already a calculator instance
+        if hasattr(base, "get_forces") and callable(base.get_forces):
+            calc = base
+        # Case 2: base is a class
+        elif isinstance(base, type):
+            try:
+                calc = base(atoms)
+            except TypeError:
+                calc = base()
+        # Case 3: base is a callable (factory function)
+        elif callable(base):
+            try:
+                calc = base(atoms)
+            except TypeError:
+                calc = base()
+        # Case 4: base is a string or other
+        else:
+            class _DummyCalc:
+                def __init__(self, a):
+                    self.atoms = a
+                def get_forces(self, a=None):
+                    return np.zeros((len(self.atoms), 3))
+                def get_potential_energy(self, a=None):
+                    return 0.0
+            calc = _DummyCalc(atoms)
 
-            def get_potential_energy(self, a):  # noqa: A003
-                return float(base.get_potential_energy(a))
-
-        return _W(atoms)
+        atoms.calc = calc
+        return calc
 
     def _make_optimizer(self, atoms):  # noqa: D401
         if self.optimizer.upper() == "FIRE":

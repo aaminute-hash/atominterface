@@ -19,7 +19,7 @@ def interface_energy(
     """
     if area <= 0:
         raise ValueError("interface area must be positive")
-    if unit not in ("eV_A2", "J_m2"):
+    if unit != "eV_A2":
         raise ValueError(f"unsupported unit {unit!r}")
     return (interface_energy_total - substrate_energy_per_area - film_energy_per_area) / area
 
@@ -55,10 +55,30 @@ def fit_cohesive_zone(
         disp = disp[order]
         trac = trac[order]
 
-    sigma_max = float(np.max(trac))
     imax = int(np.argmax(trac))
-    delta_c = float(disp[imax])
-    G_c = float(np.trapz(trac, disp))
+    if 0 < imax < len(trac) - 1:
+        # Fit ascending and descending segments with least-squares lines,
+        # then intersect them.  Exact for piecewise-linear (bilinear) CZM.
+        asc_x = disp[:imax + 1]
+        asc_y = trac[:imax + 1]
+        desc_x = disp[imax:]
+        desc_y = trac[imax:]
+        a1, b1 = np.polyfit(asc_x, asc_y, 1)
+        a2, b2 = np.polyfit(desc_x, desc_y, 1)
+        denom = a1 - a2
+        if abs(denom) > 1e-12:
+            x_peak = float((b2 - b1) / denom)
+            y_peak = float(a1 * x_peak + b1)
+        else:
+            # Degenerate: take the discrete max directly.
+            x_peak = float(disp[imax])
+            y_peak = float(trac[imax])
+    else:
+        x_peak = float(disp[imax])
+        y_peak = float(trac[imax])
+    sigma_max = y_peak
+    delta_c = x_peak
+    G_c = float(np.trapezoid(trac, disp))
     return {
         "max_traction": sigma_max,
         "critical_separation": delta_c,

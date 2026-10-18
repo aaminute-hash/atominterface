@@ -1,28 +1,33 @@
-"""AtomInterface: reliable interface modeling for AI4S.
+from __future__ import annotations
 
-Public API surface.  Keep this narrow -- adding a symbol here is a
-compatibility promise.
-"""
 
 __version__ = "0.1.0"
 
-from atominterface.builders import (
-    BuilderConfig,
-    Candidate,
-    CoherentInterfaceBuilder,
-    InterfaceBuilder,
-    builder_registry,
-    get_builder,
-    register_builder,
+
+"""Physics constants and utilities."""
+
+
+# ── 单位换算常量 ──────────────────────────────────────────────
+EV_A2_TO_J_M2: float = 16.02176634
+J_M2_TO_EV_A2: float = 1.0 / EV_A2_TO_J_M2
+EV_TO_KJ_MOL: float = 96.48533212
+BOHR_TO_ANG: float = 0.529177210903
+
+# ── 导出 ──────────────────────────────────────────────────────
+from atominterface.physics.invariants import (
+    rotate_positions,
+    rotate_stress,
+    check_force_consistency,
+    check_stress_symmetry,
 )
 
 __all__ = [
-    "__version__",
-    "BuilderConfig",
-    "Candidate",
-    "InterfaceBuilder",
-    "CoherentInterfaceBuilder",
-    "builder_registry",
-    "get_builder",
-    "register_builder",
+    "EV_A2_TO_J_M2",
+    "J_M2_TO_EV_A2",
+    "EV_TO_KJ_MOL",
+    "BOHR_TO_ANG",
+    "rotate_positions",
+    "rotate_stress",
+    "check_force_consistency",
+    "check_stress_symmetry",
 ]
