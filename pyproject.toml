@@ -32,7 +32,10 @@ dev = [
     "pytest>=7",
     "pytest-cov",
     "ruff>=0.17.1,<0.18",
-    "mypy>=2.4,<3",
+    # No upper bound: mypy 2.x is only installable on Python >=3.10, so the
+    # resolver picks 1.19 on 3.9 and 2.x on newer interpreters. The code is
+    # kept clean under both.
+    "mypy>=1.0",
     "pyyaml",
 ]
 all = ["atominterface[pymatgen,mace,chgnet,dev]"]
