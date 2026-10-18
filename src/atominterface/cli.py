@@ -7,9 +7,12 @@ chgnet) are missing.
 
 from __future__ import annotations
 
+import importlib
 import sys
 
 import typer
+
+from atominterface import __version__
 
 app = typer.Typer(
     name="atominterface",
@@ -18,15 +21,27 @@ app = typer.Typer(
     add_completion=False,
 )
 
-app.add_typer(__import__("atominterface.cli_build", fromlist=["app"]).app)
-app.add_typer(__import__("atominterface.cli_builders", fromlist=["app"]).app)
+# Sub-command modules are optional: a missing one must not make the whole
+# CLI unusable, which is why they are attached defensively.
+_SUBCOMMANDS = {
+    "atominterface.cli_build": "build",
+    "atominterface.cli_builders": "builders",
+}
+for _module_path, _command_name in _SUBCOMMANDS.items():
+    try:
+        app.add_typer(importlib.import_module(_module_path).app, name=_command_name)
+    except ModuleNotFoundError:  # pragma: no cover - optional sub-command
+        continue
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def callback(
     version: bool = typer.Option(False, "--version", "-V", help="Show version and exit."),
 ) -> None:
     """Reliable interface modeling for AI4S."""
+    if version:
+        typer.echo(__version__)
+        raise typer.Exit()
 
 
 def main(argv: list[str] | None = None) -> int:
