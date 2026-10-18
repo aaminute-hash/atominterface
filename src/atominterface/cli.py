@@ -22,16 +22,22 @@ app = typer.Typer(
 )
 
 # Sub-command modules are optional: a missing one must not make the whole
-# CLI unusable, which is why they are attached defensively.
-_SUBCOMMANDS = {
-    "atominterface.cli_build": "build",
-    "atominterface.cli_builders": "builders",
-}
-for _module_path, _command_name in _SUBCOMMANDS.items():
+# CLI unusable, which is why they are attached defensively.  A ``None``
+# command name merges the module's commands at the top level (single-command
+# modules such as ``cli_build``); otherwise the module becomes a named group.
+_SUBCOMMANDS: tuple[tuple[str, str | None], ...] = (
+    ("atominterface.cli_build", None),
+    ("atominterface.cli_builders", "builders"),
+)
+for _module_path, _command_name in _SUBCOMMANDS:
     try:
-        app.add_typer(importlib.import_module(_module_path).app, name=_command_name)
+        _subcommand = importlib.import_module(_module_path)
     except ModuleNotFoundError:  # pragma: no cover - optional sub-command
         continue
+    if _command_name is None:
+        app.add_typer(_subcommand.app)
+    else:
+        app.add_typer(_subcommand.app, name=_command_name)
 
 
 @app.callback(invoke_without_command=True)

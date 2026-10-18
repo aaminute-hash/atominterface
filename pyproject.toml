@@ -59,6 +59,9 @@ target-version = "py39"
 select = ["E", "F", "W", "I", "N", "B", "PL", "UP", "SIM", "TCH"]
 ignore = [
     "E501",
+    # typer/FastAPI style: Option/Argument objects must be created in the
+    # signature default, that is the framework's contract
+    "B008",
     "PLR0913",
     "PLR2004",
     # R/F/S matrices are conventional in mechanics tests

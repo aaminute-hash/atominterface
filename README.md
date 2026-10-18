@@ -51,10 +51,22 @@ Outputs land in `outputs/quickstart_li_nacl/`.
 ```bash
 atominterface --version
 atominterface builders list-builders
-atominterface build coherent substrate.cif film.cif \
+
+# Enumerate coherent interfaces for a substrate/film pair.
+atominterface build examples/data/Cu_fcc.vasp examples/data/Ni_fcc.vasp \
     --sub-miller 0,0,1 --film-miller 0,0,1 \
-    --max-strain 0.05 --out-csv candidates.csv --out-dir candidates/
+    --max-strain 0.05 --max-area 100 \
+    --max-candidates 5 --outdir outputs/build
 ```
+
+`build` writes one structure file per candidate (`extxyz` by default, see
+`--format`) plus a `candidates.csv` summary. Mismatch is reported as
+`max(stretch, shear)` of the in-plane strain; the substrate cell is the
+reference, so the whole mismatch sits on the film.
+
+If every candidate is rejected, the command reports the closest lattice
+matches it found and the `--max-strain` value that would keep them,
+instead of just exiting empty.
 
 ## Python API
 

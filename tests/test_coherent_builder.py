@@ -16,7 +16,9 @@ from atominterface.builders.coherent import (
     _make_slabs,
     _match_lattices,
     _MatchInfo,
-    _supercell_factors,
+    _multiplicity,
+    _scale_in_plane,
+    _supercell_transform,
     _to_candidate,
 )
 from atominterface.builders.registry import builder_registry
@@ -78,15 +80,16 @@ def test_lattice_area():
     assert abs(_lattice_area(lattice) - 16.0) < 1e-12
 
 
-def test_supercell_factors_rounds_to_integers():
-    mat = np.array([[2.0, 0.0], [0.0, 3.0]])
-    assert _supercell_factors(mat) == (3, 3)
+def test_supercell_transform_keeps_off_diagonal_entries():
+    """A rotated supercell must not be flattened to its diagonal."""
+    mat = np.array([[1.0, -1.0], [1.0, 1.0]])
+    assert _supercell_transform(mat) == ((1, -1), (1, 1))
+    assert _multiplicity(((1, -1), (1, 1))) == 2
 
 
-def test_supercell_factors_avoids_zero():
-    mat = np.array([[0.4, 0.0], [0.0, 0.6]])
-    m, n = _supercell_factors(mat)
-    assert m >= 1 and n >= 1
+def test_supercell_transform_rounds_float_noise():
+    mat = np.array([[2.0000001, 0.0], [0.0, 2.9999998]])
+    assert _supercell_transform(mat) == ((2, 0), (0, 3))
 
 
 def test_assemble_interface_manual_fallback(cubic_structure):
@@ -265,19 +268,18 @@ def test_builder_name():
     assert builder.name == "coherent"
 
 
-def test_build_all_returns_candidates(fcc_structure, bcc_structure):
-    config = CoherentInterfaceConfig(
-        substrate_miller=(0, 0, 1),
-        film_miller=(0, 0, 1),
-        max_strain=0.30,
-        max_area=500.0,
-        gap=2.0,
-        relax_terminations=False,
-    )
+def test_build_all_returns_candidates():
+    """Two fcc cells 1.2 % apart form a genuine coherent interface."""
     builder = CoherentInterfaceBuilder(
-        substrate=fcc_structure,
-        film=bcc_structure,
-        config=config,
+        substrate=_fcc("Al", 4.05),
+        film=_fcc("Al", 4.00),
+        config=CoherentInterfaceConfig(
+            substrate_miller=(0, 0, 1),
+            film_miller=(0, 0, 1),
+            max_strain=0.05,
+            gap=2.0,
+            relax_terminations=False,
+        ),
     )
 
     candidates = builder.build_all()
@@ -285,6 +287,26 @@ def test_build_all_returns_candidates(fcc_structure, bcc_structure):
     assert all(c.area > 0 for c in candidates)
     assert all(c.builder_name == "coherent" for c in candidates)
     assert all(c.total_atoms > 0 for c in candidates)
+    # Candidate.atoms must be the ASE view, not the pymatgen Structure.
+    assert all(hasattr(c.atoms, "get_positions") for c in candidates)
+
+
+def test_build_all_rejects_an_incoherent_pair(fcc_structure, bcc_structure):
+    """fcc(001) is a 60-degree rhombus, bcc(001) a square: no coherent match.
+
+    Asserted at the default 5 % tolerance, which no supercell of this pair
+    can satisfy -- the in-plane shear alone is ~30 degrees.  (At a loose
+    30 % tolerance the diagonal fallback *will* hand back something, and
+    which path gets there depends on the pymatgen build, so the cut-off is
+    the part worth pinning.)
+    """
+    builder = CoherentInterfaceBuilder(
+        substrate=fcc_structure,
+        film=bcc_structure,
+        config=CoherentInterfaceConfig(relax_terminations=False),
+    )
+
+    assert builder.build_all() == []
 
 
 def test_build_all_filters_by_strain(fcc_structure, bcc_structure):
@@ -293,7 +315,7 @@ def test_build_all_filters_by_strain(fcc_structure, bcc_structure):
         substrate_miller=(0, 0, 1),
         film_miller=(0, 0, 1),
         max_strain=0.001,
-        max_area=500.0,
+        max_area=100.0,
         gap=2.0,
         relax_terminations=False,
     )
@@ -312,7 +334,7 @@ def test_build_all_relax_terminations_off(fcc_structure):
         substrate_miller=(0, 0, 1),
         film_miller=(0, 0, 1),
         max_strain=0.30,
-        max_area=500.0,
+        max_area=100.0,
         relax_terminations=False,
     )
     builder = CoherentInterfaceBuilder(
@@ -406,7 +428,7 @@ def test_make_slabs_relax_terminations_flag(fcc_structure):
 def test_match_lattices_uses_zsl_when_available(fcc_structure, bcc_structure):
     config = CoherentInterfaceConfig(
         max_strain=0.30,
-        max_area=500.0,
+        max_area=100.0,
         zsl_max_area_ratio=4.0,
         zsl_max_angle=2.0,
     )
@@ -425,7 +447,7 @@ def test_match_lattices_uses_zsl_when_available(fcc_structure, bcc_structure):
 def test_match_lattices_fallback_when_zsl_fails(fcc_structure):
     config = CoherentInterfaceConfig(
         max_strain=0.30,
-        max_area=500.0,
+        max_area=100.0,
     )
 
     with patch(
@@ -481,3 +503,99 @@ def test_registration_on_import():
     assert "coherent" in builder_registry.list()
     cls = builder_registry.get("coherent")
     assert cls is CoherentInterfaceBuilder
+
+
+def _fcc(species: str, a: float):
+    """Conventional fcc cell, as a bulk input for the coherent builder."""
+    from pymatgen.core import Lattice, Structure  # noqa: WPS433
+
+    return Structure(
+        Lattice.cubic(a),
+        [species] * 4,
+        [[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]],
+    )
+
+
+def test_scale_in_plane_does_not_mutate_the_source_slab():
+    """Newer pymatgen defaults ``make_supercell`` to in_place=True.
+
+    Without a defensive copy the candidate loop compounds: the first
+    candidate is 13x, the second 169x, the third 2537x.
+    """
+    slab = _fcc("Cu", 3.615)
+    before = abs(np.linalg.det(np.asarray(slab.lattice.matrix)[:2, :2]))
+
+    first = _scale_in_plane(slab, ((2, 0), (0, 1)))
+    second = _scale_in_plane(slab, ((2, 0), (0, 1)))
+
+    after = abs(np.linalg.det(np.asarray(slab.lattice.matrix)[:2, :2]))
+    assert after == pytest.approx(before)
+    assert len(first) == len(second) == 2 * len(slab)
+    assert abs(np.linalg.det(np.asarray(first.lattice.matrix)[:2, :2])) == pytest.approx(2 * before)
+
+
+def test_supercell_can_be_rotated_and_anisotropic():
+    slab = _fcc("Cu", 3.615)
+    scaled = _scale_in_plane(slab, ((1, 0), (1, 2)))
+    assert len(scaled) == 2 * len(slab)
+
+
+def test_build_prefers_the_smallest_equally_good_cell():
+    """Identical cell shapes tie on strain; the smallest cell must win.
+
+    Getting this wrong produced 1.8-million-atom "candidates" whose
+    strain was identical to the 4-atom cell, because the ranking key was
+    dominated by float noise in the strain.
+    """
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615),
+        film=_fcc("Ni", 3.524),
+        config=CoherentInterfaceConfig(max_candidates=1),
+    )
+
+    candidates = builder.build()
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.total_atoms == 4
+    # fcc(001) primitive 2D cell of Cu: a^2 / 2.
+    assert candidate.area == pytest.approx(3.615**2 / 2, rel=1e-6)
+    # Strain applied *to the film*: (a_Cu - a_Ni) / a_Ni.
+    assert candidate.metadata["mismatch"] == pytest.approx(3.615 / 3.524 - 1, rel=1e-3)
+
+
+def test_build_geometry_is_coherent():
+    """The substrate and the film must end up in the same in-plane cell."""
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615),
+        film=_fcc("Ni", 3.524),
+        config=CoherentInterfaceConfig(max_candidates=3, gap=2.0),
+    )
+
+    for candidate in builder.build():
+        cell = np.asarray(candidate.atoms.get_cell()[:2], dtype=float)
+        # Coherent by construction: one shared cell for both slabs.
+        assert candidate.area == pytest.approx(abs(np.linalg.det(cell[:2, :2])))
+        # The two slabs must not overlap: film z > substrate z + gap.
+        z = candidate.atoms.get_positions()[:, 2]
+        symbols = candidate.atoms.get_chemical_symbols()
+        sub_z = z[[s == "Cu" for s in symbols]]
+        film_z = z[[s == "Ni" for s in symbols]]
+        assert film_z.min() >= sub_z.max() + 2.0 - 1e-6
+
+
+def test_preview_matches_ignores_the_strain_cutoff():
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615),
+        film=_fcc("Ni", 3.524),
+        config=CoherentInterfaceConfig(max_strain=0.001),
+    )
+
+    assert builder.build() == []
+
+    preview = builder.preview_matches(limit=3)
+    assert preview
+    assert len(preview) <= 3
+    # The closest match is the 2.6 % isotropic Cu/Ni mismatch.
+    assert preview[0].strain == pytest.approx(3.615 / 3.524 - 1, rel=1e-3)
+    assert preview[0].shear_strain == pytest.approx(0.0, abs=1e-6)
