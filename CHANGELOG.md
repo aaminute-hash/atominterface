@@ -1,5 +1,55 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `atominterface build` now works end to end: loads a substrate/film pair,
+  enumerates coherent matches, writes one structure file per candidate plus
+  `candidates.csv`, and supports `python -m atominterface`.
+- `CoherentInterfaceBuilder.preview_matches()` reports the best lattice
+  matches ignoring the strain cut-off, so an empty result comes with the
+  `--max-strain` value that would keep them instead of a dead end.
+- `in_plane_mismatch()` / `max_stretch_strain()` / `max_shear_strain()`:
+  2D engineering strain for surface cells.
+- Example input structures `examples/data/{Cu,Ni}_fcc.vasp`.
+
+### Changed
+- **Strain metric is now two-dimensional.** The old code folded the vacuum
+  axis into a 3D deviatoric decomposition, which reported a pure 5 %
+  isotropic in-plane stretch as 3.4 % tensile *plus* 3.4 % shear that does
+  not exist in the crystal, so well-matched pairs were rejected. `tensile`
+  is now half the trace of the in-plane strain tensor and `shear` is the
+  in-plane principal spread. `compute_mismatch()` keeps the 3D behaviour
+  for genuinely 3D cells.
+- Lattice matching runs on the **slab** in-plane cells instead of the bulk
+  cells. For any surface other than (001) the bulk's first two vectors are
+  not in the interface plane, and the reported `match_area` disagreed with
+  the assembled geometry.
+- `max_area` default 500 -> 100 A^2. The ZSL enumeration is super-linear in
+  area: on a typical 2D cell 100 A^2 takes < 1 s while 500 A^2 takes
+  minutes. `max_area_ratio` now drives ZSL's area tolerance, and
+  `zsl_max_area_ratio` is a real bound on the matched supercell area ratio
+  instead of an implicit `-1.0` fudge.
+- `Candidate.atoms` is now the ASE `Atoms` view, as its docstring always
+  claimed; it was leaking a pymatgen `Structure` and every exporter raised.
+
+### Fixed
+- `make_supercell` was mutating the source slab (newer pymatgen defaults to
+  `in_place=True`), compounding candidates from 6.5 to 1104 to 16564 A^2.
+- Match ranking was decided by float noise in the strain, so a pair with
+  identical cell shapes produced million-atom "best" candidates; equally
+  good matches are now ranked by area.
+- `interface_id` was identical for every supercell of the same surface pair.
+- `strain_film` reported the shear strain instead of the stretch.
+- `vacuum_thickness` was ignored during assembly (the code looked for a
+  non-existent `vacuum` field).
+- `_fallback_matches` scaled the film but reported the substrate as scaled,
+  and computed the area from the wrong cell.
+- `<supercell>` factors returned a bogus `(m, n)` pair instead of the
+  integer transformation matrix.
+- The quickstart example took over 5 minutes because it asked pymatgen's
+  ZSL for 600 A^2 interfaces; it is now 8 seconds and exposes `--max-area`.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

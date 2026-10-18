@@ -64,7 +64,7 @@ def build_coherent_interfaces(
     substrate_miller=(0, 0, 1),
     film_miller=(0, 0, 1),
     max_strain=0.08,
-    max_area=600,
+    max_area=100,
     gap=2.0,
     vacuum_over_film=12.0,
     film_layers=2,
@@ -222,6 +222,12 @@ def main():
     parser.add_argument("--sub-miller", nargs=3, type=int, default=(0, 0, 1))
     parser.add_argument("--film-miller", nargs=3, type=int, default=(0, 0, 1))
     parser.add_argument("--max-strain", type=float, default=0.08)
+    parser.add_argument(
+        "--max-area",
+        type=float,
+        default=100.0,
+        help="Max interface area in A^2; ZSL cost grows fast with this value.",
+    )
     parser.add_argument("--relax", action="store_true", help="run guarded dummy relax")
     parser.add_argument("--outdir", default="outputs/quickstart_li_nacl")
     args = parser.parse_args()
@@ -242,6 +248,7 @@ def main():
         substrate_miller=tuple(args.sub_miller),
         film_miller=tuple(args.film_miller),
         max_strain=args.max_strain,
+        max_area=args.max_area,
     )
 
     if not candidates:
