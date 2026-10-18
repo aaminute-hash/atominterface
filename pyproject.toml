@@ -31,8 +31,8 @@ chgnet = ["chgnet"]
 dev = [
     "pytest>=7",
     "pytest-cov",
-    "ruff>=0.1",
-    "mypy>=1.0",
+    "ruff>=0.17.1,<0.18",
+    "mypy>=2.4,<3",
     "pyyaml",
 ]
 all = ["atominterface[pymatgen,mace,chgnet,dev]"]

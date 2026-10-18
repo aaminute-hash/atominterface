@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 
+# NumPy 2.0 renamed ``trapz`` to ``trapezoid``.  Both names are still in
+# circulation depending on the installed NumPy, so resolve once at import
+# time to stay compatible with the full ``numpy>=1.21`` support range.
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
+
 
 def interface_energy(
     *,
@@ -78,7 +83,7 @@ def fit_cohesive_zone(
         y_peak = float(trac[imax])
     sigma_max = y_peak
     delta_c = x_peak
-    G_c = float(np.trapezoid(trac, disp))
+    G_c = float(_trapezoid(trac, disp))
     return {
         "max_traction": sigma_max,
         "critical_separation": delta_c,
