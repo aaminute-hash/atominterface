@@ -13,6 +13,7 @@ protocol, adding:
 from __future__ import annotations
 
 import math
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -26,11 +27,8 @@ from atominterface.builders.base import (
 )
 from atominterface.builders.registry import register_builder
 from atominterface.builders.strain import (
+    max_shear_strain,
     max_stretch_strain,
-    max_shear_strain,
-)
-from atominterface.builders.strain import (
-    max_shear_strain,
 )
 from atominterface.physics import EV_A2_TO_J_M2
 
@@ -178,6 +176,7 @@ def _get_terminations(structure, miller):
 
     return out
 
+
 def _make_slabs(substrate, film, config: CoherentInterfaceConfig):
     """Build substrate / film slabs for every termination.
 
@@ -278,10 +277,8 @@ def _match_lattices(sub_lattice, film_lattice, config):
                 continue
 
             rotation = None
-            try:
+            with suppress(Exception):
                 rotation = np.asarray(match.match_transformation, dtype=np.float64)
-            except Exception:  # noqa: BLE001
-                pass
 
             matches.append(
                 _MatchInfo(
@@ -410,6 +407,7 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         coords_are_cartesian=True,
         to_unit_cell=False,
     )
+
 
 def _reduced_formula(structure) -> str:
     """Best-effort reduced formula without requiring composition."""

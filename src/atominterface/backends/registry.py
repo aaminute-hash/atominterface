@@ -6,6 +6,7 @@ the package remains importable in CI without heavy optional deps.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 
 import numpy as np
@@ -120,7 +121,5 @@ def autodiscover():  # noqa: D401
     import importlib
 
     for mod in ("mace_", "chgnet_"):
-        try:
+        with suppress(Exception):
             importlib.import_module(f"atominterface.backends.{mod}")
-        except Exception:  # noqa: BLE001
-            pass

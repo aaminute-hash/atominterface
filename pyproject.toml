@@ -59,14 +59,24 @@ ignore = [
     "PLR0913",
     "PLR2004",
     # R/F/S matrices are conventional in mechanics tests
+    "N803",
     "N806",
     "N807",
     "N816",
+    # builders and examples legitimately take many positional arguments
+    "PLR0917",
+    # optional deps are bound to module-level alias constants so tests can patch them
+    "N814",
     # examples/backends use lazy imports by design (optional deps)
     "PLC0415",
     # 2-arg super() is fine in our wrapper classes
     "UP008",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# package __init__ files re-export at the bottom to keep constants/dataclasses grouped
+"src/atominterface/__init__.py" = ["E402"]
+"src/atominterface/physics/__init__.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,11 +6,15 @@ import numpy as np
 
 _LATTICE_CLS = None
 
+
 def _lattice_cls():
-    global _LATTICE_CLS
+    # Cached lazy import of the optional pymatgen dependency; the module-level
+    # cache is intentional so repeated calls do not retry a failed import.
+    global _LATTICE_CLS  # noqa: PLW0603
     if _LATTICE_CLS is None:
         try:
             from pymatgen.core.lattice import Lattice
+
             _LATTICE_CLS = Lattice
         except ImportError:
             _LATTICE_CLS = False
@@ -42,9 +46,9 @@ def _as_pymatgen_lattice(matrix):
 
 def _to_matrix(obj):
     """Extract 3x3 matrix from Lattice object, array, or list."""
-    if hasattr(obj, 'matrix'):
+    if hasattr(obj, "matrix"):
         return np.asarray(obj.matrix, dtype=float)
-    elif hasattr(obj, 'a') and hasattr(obj, 'b') and hasattr(obj, 'c'):
+    elif hasattr(obj, "a") and hasattr(obj, "b") and hasattr(obj, "c"):
         # pymatgen Lattice-like duck type
         return np.array([obj.a, obj.b, obj.c], dtype=float)
     else:
@@ -98,13 +102,12 @@ def strain_filter(candidates, max_strain=0.05):
     """Filter candidate interfaces by maximum allowed strain."""
     filtered = []
     for c in candidates:
-        if hasattr(c, 'strain') and c.strain is not None:
+        if hasattr(c, "strain") and c.strain is not None:
             if isinstance(c.strain, dict):
                 if c.strain.get("von_mises", 0) <= max_strain:
                     filtered.append(c)
-            else:
-                if float(c.strain) <= max_strain:
-                    filtered.append(c)
+            elif float(c.strain) <= max_strain:
+                filtered.append(c)
         else:
             filtered.append(c)
     return filtered

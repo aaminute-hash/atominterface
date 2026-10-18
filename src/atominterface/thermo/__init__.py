@@ -59,8 +59,8 @@ def fit_cohesive_zone(
     if 0 < imax < len(trac) - 1:
         # Fit ascending and descending segments with least-squares lines,
         # then intersect them.  Exact for piecewise-linear (bilinear) CZM.
-        asc_x = disp[:imax + 1]
-        asc_y = trac[:imax + 1]
+        asc_x = disp[: imax + 1]
+        asc_y = trac[: imax + 1]
         desc_x = disp[imax:]
         desc_y = trac[imax:]
         a1, b1 = np.polyfit(asc_x, asc_y, 1)

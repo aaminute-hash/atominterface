@@ -61,7 +61,6 @@ def build_coherent_interfaces(
             CoherentInterfaceBuilder,
         )
         from pymatgen.analysis.interfaces.zsl import ZSLGenerator
-        from pymatgen.core import Structure
         from pymatgen.io.ase import AseAtomsAdaptor
     except ImportError:
         sys.exit(

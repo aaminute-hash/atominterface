@@ -209,7 +209,9 @@ def test_to_candidate_energy_per_area_conversion(cubic_structure):
 
     expected = 3.2 / area
     assert abs(candidate.metadata["energy_per_area_ev_a2"] - expected) < 1e-12
-    assert candidate.metadata["energy_per_area_jm2"] == pytest.approx(expected * 16.02176634, rel=1e-6)
+    assert candidate.metadata["energy_per_area_jm2"] == pytest.approx(
+        expected * 16.02176634, rel=1e-6
+    )
 
 
 def test_validate_rejects_missing_structures():
