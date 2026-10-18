@@ -21,10 +21,12 @@ from .watchers import ForceNormWatcher, NeighborWatcher, WatchResult
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ase.atoms import Atoms
+
 
 @dataclass
 class RelaxResult:
-    atoms: Atoms  # noqa: F821
+    atoms: Atoms
     n_steps: int = 0
     converged: bool = False
     ood_triggered: bool = False
@@ -56,7 +58,7 @@ class GuardedRelaxer:
         self.fmax = fmax
         self.max_steps = max_steps
         self.ood_threshold = ood_threshold
-        self.watchers = (
+        self.watchers: list[Callable[..., WatchResult]] = (
             list(watchers)
             if watchers is not None
             else [

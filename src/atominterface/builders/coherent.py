@@ -412,7 +412,7 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
 def _reduced_formula(structure) -> str:
     """Best-effort reduced formula without requiring composition."""
     try:
-        return structure.composition.reduced_formula
+        return str(structure.composition.reduced_formula)
     except Exception:  # noqa: BLE001
         try:
             from collections import Counter
@@ -560,7 +560,7 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
             "film": _describe(film_terms),
         }
 
-    def build(self, config: CoherentInterfaceConfig | None = None) -> list[Candidate]:
+    def build(self, config: BuilderConfig | None = None) -> list[Candidate]:
         """Generate all strain-acceptable interface candidates."""
         return self.build_all()
 
