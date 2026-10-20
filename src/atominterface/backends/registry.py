@@ -46,6 +46,22 @@ def _dummy_calc(atoms, state: _DummyState | None = None):  # noqa: D401
                 return np.asarray(st.stress, dtype=float)
             return np.zeros(6)
 
+        @property
+        def results(self):
+            """Results mapping, so ASE writers can serialize the state.
+
+            The relaxers only call the ``get_*`` methods, but writing a
+            relaxed structure (``ase.io.write``) reads ``calc.results``;
+            without this the documented ``--relax`` demo crashes.
+            """
+            atoms = self._atoms
+            return {
+                "energy": self.get_potential_energy(atoms),
+                "free_energy": self.get_potential_energy(atoms),
+                "forces": self.get_forces(atoms),
+                "stress": self.get_stress(atoms),
+            }
+
     return _Dummy(atoms, st)
 
 
