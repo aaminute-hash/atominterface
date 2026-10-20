@@ -214,7 +214,9 @@ def _prepare_charge_structure(structure, charges=None, oxidation_states=None):
         required = (ANALYSIS_CHARGE, CHARGE_KNOWN, CHARGE_SOURCE)
         if not all(key in properties for key in required):
             raise ValueError("incomplete stored analysis charge properties")
-        stored = dict(zip(("values", "known", "sources"), (properties[k] for k in required)))
+        stored = dict(
+            zip(("values", "known", "sources"), (properties[k] for k in required), strict=True)
+        )
     oxidation = [getattr(site.specie, "oxi_state", None) for site in structure]
     data = resolve_charge_data(
         [site.specie.symbol for site in structure],
