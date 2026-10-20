@@ -52,10 +52,26 @@ def _call_compat(func, *args, **kwargs):
 
 
 def make_bulks():
-    """Return substrate (Li, bcc) and film (NaCl, rocksalt) ASE structures."""
-    li = bulk("Li", crystalstructure="bcc", a=3.49)
-    nacl = bulk("NaCl", crystalstructure="rocksalt", a=5.64)
+    """Return substrate (Li, bcc) and film (NaCl, rocksalt) ASE structures.
+
+    ``cubic=True`` asks ASE for the conventional cubic cell.  ASE's
+    default is the primitive cell, whose vector norm is ``a*sqrt(3)/2``
+    for bcc and ``a/sqrt(2)`` for rocksalt -- printing that norm as the
+    lattice constant reports 3.022 A for Li (a = 3.49 A) and 3.988 A for
+    NaCl (a = 5.64 A).
+    """
+    li = bulk("Li", crystalstructure="bcc", a=3.49, cubic=True)
+    nacl = bulk("NaCl", crystalstructure="rocksalt", a=5.64, cubic=True)
     return li, nacl
+
+
+def _matrix_label(matrix):
+    """Compact label for a 2x2 supercell transformation matrix."""
+    if matrix is None:
+        return "?"
+    dense = np.rint(np.asarray(matrix, dtype=float)).astype(int)
+    top, bottom = dense[0], dense[1]
+    return f"({top[0]},{top[1]};{bottom[0]},{bottom[1]})"
 
 
 def build_coherent_interfaces(
@@ -122,10 +138,15 @@ def build_coherent_interfaces(
             atoms = _call_compat(AseAtomsAdaptor.get_atoms, iface, msonable=False)
             props = getattr(iface, "interface_properties", {}) or {}
             strain = props.get("strain")
-            von_mises = props.get("von_mises")
+            # pymatgen reports the equivalent strain as "von_mises_strain";
+            # only some releases used the bare "von_mises" key.  A missing
+            # key is reported as NaN -- never silently as zero.
+            von_mises = props.get("von_mises_strain", props.get("von_mises"))
 
             atoms.info["termination"] = str(termination)
             atoms.info["match_area"] = float(props.get("match_area", float("nan")))
+            atoms.info["film_supercell"] = _matrix_label(props.get("film_transformation"))
+            atoms.info["substrate_supercell"] = _matrix_label(props.get("substrate_transformation"))
             atoms.info["strain_trace"] = (
                 float(np.trace(np.array(strain))) if strain is not None else float("nan")
             )
@@ -134,6 +155,22 @@ def build_coherent_interfaces(
             )
 
             candidates.append(atoms)
+
+    # Exact-geometry dedup.  pymatgen can hand back the very same
+    # interface under several termination labels; genuinely different ZSL
+    # matches always differ in their positions, so this never drops a
+    # distinct candidate.  (Symmetry-equivalent matches -- same strain,
+    # same area, rotated supercells -- are kept and distinguished by the
+    # supercell columns in the report.)
+    unique = {}
+    for atoms in candidates:
+        signature = (
+            tuple(np.round(np.asarray(atoms.cell, dtype=float), 3).ravel()),
+            tuple(atoms.get_atomic_numbers()),
+            tuple(np.round(atoms.get_positions(), 3).ravel()),
+        )
+        unique.setdefault(signature, atoms)
+    candidates = list(unique.values())
 
     kept = []
     for atoms in candidates:
@@ -190,6 +227,8 @@ def summarize(candidates, outdir: Path):
             {
                 "id": i,
                 "termination": str(atoms.info.get("termination", "?")),
+                "film_supercell": str(atoms.info.get("film_supercell", "?")),
+                "substrate_supercell": str(atoms.info.get("substrate_supercell", "?")),
                 "von_mises_strain": float(atoms.info.get("von_mises_strain", float("nan"))),
                 "area_A2": float(area),
                 "natoms": n,
@@ -198,18 +237,31 @@ def summarize(candidates, outdir: Path):
         ase_write(outdir / f"candidate_{i:02d}.xyz", atoms)
 
     print("\nCandidate interfaces")
-    print(f"{'id':>3}  {'termination':28} {'von_mises':>10} {'area/A^2':>10} {'natoms':>7}")
+    print(
+        f"{'id':>3}  {'termination':35} {'film sc':>12} {'sub sc':>12} "
+        f"{'von_mises':>10} {'area/A^2':>10} {'natoms':>7}"
+    )
     for r in rows:
         vm_str = "  -  " if np.isnan(r["von_mises_strain"]) else f"{r['von_mises_strain']:+.4f}"
         print(
-            f"{r['id']:>3}  {r['termination'][:28]:28} {vm_str:>10} {r['area_A2']:10.2f} {r['natoms']:7d}"
+            f"{r['id']:>3}  {r['termination'][:35]:35} {r['film_supercell']:>12} "
+            f"{r['substrate_supercell']:>12} {vm_str:>10} {r['area_A2']:10.2f} {r['natoms']:7d}"
         )
 
     import csv as _csv
 
     with (outdir / "candidates.csv").open("w", newline="", encoding="utf-8") as f:
         writer = _csv.DictWriter(
-            f, fieldnames=["id", "termination", "von_mises_strain", "area_A2", "natoms"]
+            f,
+            fieldnames=[
+                "id",
+                "termination",
+                "film_supercell",
+                "substrate_supercell",
+                "von_mises_strain",
+                "area_A2",
+                "natoms",
+            ],
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -239,8 +291,9 @@ def main():
     li, nacl = make_bulks()
     ase_write(outdir / "Li_bulk.xyz", li)
     ase_write(outdir / "NaCl_bulk.xyz", nacl)
-    print(f"substrate: Li bcc, a={li.cell[0, 0]:.3f} A")
-    print(f"film:      NaCl rocksalt, a={nacl.cell[0, 0]:.3f} A")
+    # Conventional cubic cells: the vector norm is the lattice constant.
+    print(f"substrate: Li bcc, a={np.linalg.norm(li.cell[0]):.3f} A")
+    print(f"film:      NaCl rocksalt, a={np.linalg.norm(nacl.cell[0]):.3f} A")
 
     candidates = build_coherent_interfaces(
         li,
@@ -252,11 +305,11 @@ def main():
     )
 
     if not candidates:
-        print("\nNo coherent match under current ZSL tolerances.")
+        print("\nNo coherent candidate under the current ZSL and strain tolerances.")
         print("Falling back to a manual stacked slab for the relax demo only.")
         candidates = preset_stack(li, nacl)
     else:
-        print(f"\nFound {len(candidates)} coherent candidate(s) before strain filter.")
+        print(f"\nKept {len(candidates)} coherent candidate(s) after the strain filter.")
 
     summarize(candidates, outdir)
 
