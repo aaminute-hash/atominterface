@@ -13,7 +13,8 @@ from atominterface.builders.base import (
     Candidate,
     InterfaceBuilder,
 )
-from atominterface.builders.coherent import CoherentInterfaceBuilder
+from atominterface.builders.charge import analyze_charge_polarity
+from atominterface.builders.coherent import CoherentInterfaceBuilder, CoherentInterfaceConfig
 from atominterface.builders.registry import (
     BuilderRegistry,
     autodiscover,
@@ -31,6 +32,8 @@ __all__ = [
     "Candidate",
     "InterfaceBuilder",
     "CoherentInterfaceBuilder",
+    "CoherentInterfaceConfig",
+    "analyze_charge_polarity",
     "BuilderRegistry",
     "builder_registry",
     "get_builder",

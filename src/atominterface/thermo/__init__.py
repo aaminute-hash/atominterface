@@ -4,6 +4,23 @@ from __future__ import annotations
 
 import numpy as np
 
+from atominterface.thermo.surface import (
+    TerminationRecord,
+    rank_terminations,
+    slab_formula_units,
+    termination_energy,
+)
+
+__all__ = [
+    "TerminationRecord",
+    "fit_cohesive_zone",
+    "interface_energy",
+    "rank_terminations",
+    "slab_formula_units",
+    "termination_energy",
+    "work_of_separation",
+]
+
 # NumPy 2.0 renamed ``trapz`` to ``trapezoid``.  Both names are still in
 # circulation depending on the installed NumPy, so resolve once at import
 # time to stay compatible with the full ``numpy>=1.21`` support range.

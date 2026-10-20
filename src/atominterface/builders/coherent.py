@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import warnings
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,20 @@ from atominterface.builders.base import (
     BuilderConfig,
     Candidate,
     InterfaceBuilder,
+)
+from atominterface.builders.charge import (
+    ANALYSIS_CHARGE,
+    CHARGE_KNOWN,
+    CHARGE_SOURCE,
+    SLAB_ID,
+    _site_dependent_charge,
+    analyze_charge_polarity,
+    charge_rejection_reasons,
+    make_symmetric_slab,
+    resolve_charge_data,
+    tasker_classification,
+    termination_cuts,
+    validate_charge_options,
 )
 from atominterface.builders.registry import register_builder
 from atominterface.builders.strain import (
@@ -94,6 +109,12 @@ class CoherentInterfaceConfig(BuilderConfig):
         False, only the first termination of each slab is used.
     vacuum_thickness : float, optional
         Thickness of vacuum padding normal to the interface (Å).
+    symmetric_slabs : bool or str, optional
+        ``"auto"`` (default) never transforms a structure: a termination
+        that the supplied charge model marks polar only raises a warning
+        naming the Miller indices and the ``--symmetric`` option.  ``True``
+        forces mirror-symmetric boards (same termination on both surfaces,
+        cut at half the configured thickness).  ``False`` disables both.
     """
 
     substrate_miller: tuple[int, int, int] = (0, 0, 1)
@@ -105,6 +126,36 @@ class CoherentInterfaceConfig(BuilderConfig):
     zsl_max_angle: float = 2.0
     relax_terminations: bool = True
     vacuum_thickness: float = 15.0
+    charge_policy: str = "report"
+    substrate_oxidation: dict[str, float] | None = None
+    film_oxidation: dict[str, float] | None = None
+    substrate_charges: tuple[float, ...] | None = None
+    film_charges: tuple[float, ...] | None = None
+    charge_tolerance: float = 1e-6
+    dipole_tolerance: float = 1e-3
+    symmetric_slabs: bool | str = "auto"
+
+    def validate(self) -> list[str]:
+        errors = super().validate()
+        try:
+            validate_charge_options(
+                self.charge_policy, self.charge_tolerance, self.dipole_tolerance
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+        if not (
+            self.symmetric_slabs is True
+            or self.symmetric_slabs is False
+            or self.symmetric_slabs == "auto"
+        ):
+            errors.append("symmetric_slabs must be True, False or 'auto'")
+        if self.vacuum_dir != 2:
+            errors.append("coherent construction currently requires vacuum_dir=2")
+        if not math.isfinite(self.vacuum_thickness) or self.vacuum_thickness < 0:
+            errors.append("vacuum_thickness must be finite and non-negative")
+        if not math.isfinite(self.gap) or self.gap < 0:
+            errors.append("gap must be finite and non-negative")
+        return errors
 
 
 @dataclass
@@ -153,72 +204,147 @@ def _as_pymatgen_lattice(obj):
     return Lattice(arr)
 
 
-def _get_terminations(structure, miller):
-    """Return all terminations for a given surface.
+def _prepare_charge_structure(structure, charges=None, oxidation_states=None):
+    """Resolve on a bulk copy, before cutting or replicating any sites."""
+    if not structure.is_ordered:
+        raise ValueError("charge analysis requires ordered structures")
+    properties = structure.site_properties
+    stored = None
+    if ANALYSIS_CHARGE in properties:
+        required = (ANALYSIS_CHARGE, CHARGE_KNOWN, CHARGE_SOURCE)
+        if not all(key in properties for key in required):
+            raise ValueError("incomplete stored analysis charge properties")
+        stored = dict(zip(("values", "known", "sources"), (properties[k] for k in required)))
+    oxidation = [getattr(site.specie, "oxi_state", None) for site in structure]
+    data = resolve_charge_data(
+        [site.specie.symbol for site in structure],
+        charges=charges,
+        oxidation_states=oxidation_states,
+        stored=stored,
+        initial_charges=properties.get("charge"),
+        oxi_states=oxidation if any(value is not None for value in oxidation) else None,
+    )
+    prepared = structure.copy()
+    prepared.properties.update(structure.properties)
+    for key, name in (
+        (ANALYSIS_CHARGE, "values"),
+        (CHARGE_KNOWN, "known"),
+        (CHARGE_SOURCE, "sources"),
+    ):
+        prepared.add_site_property(key, data[name].tolist())
+    prepared.properties["charge_overridden_sources"] = data["overridden_sources"]
+    return prepared
 
-    Returns a list of (termination_index, Structure) tuples.
-    Uses pymatgen SlabGenerator to produce actual slab structures.
-    Falls back to bulk structure if slab generation fails.
+
+def _get_terminations(structure, miller, min_thickness, vacuum_thickness):
+    """Return numbered slabs for one surface.
+
+    The bulk is never handed back as a slab: a surface whose termination
+    cuts all fail raises :class:`ValueError` naming the Miller indices, so
+    a failed cut can never masquerade as a finite interface slab.
     """
     from pymatgen.core.surface import SlabGenerator
 
-    out = []
+    preserve_sites = _site_dependent_charge(structure)
     try:
-        sg = SlabGenerator(
+        generator = SlabGenerator(
             structure,
             miller_index=miller,
-            min_slab_size=1.0,
-            min_vacuum_size=1.0,
-            in_unit_planes=True,
+            min_slab_size=min_thickness,
+            min_vacuum_size=vacuum_thickness,
+            in_unit_planes=False,
             center_slab=True,
+            primitive=not preserve_sites,
         )
-        slabs = sg.get_slabs()
-        if slabs:
-            for idx, slab in enumerate(slabs):
-                out.append((idx, slab))
-    except Exception:
-        pass
+        slabs = termination_cuts(generator) if preserve_sites else generator.get_slabs()
+    except Exception as exc:
+        raise ValueError(f"slab generation failed for Miller indices {miller}: {exc}") from exc
 
+    out = []
+    for idx, slab in enumerate(slabs):
+        if slab is None:
+            continue
+        slab.properties["ai_slab_generated"] = True
+        slab.properties["charge_overridden_sources"] = structure.properties.get(
+            "charge_overridden_sources", []
+        )
+        out.append((idx, slab))
     if not out:
-        out.append((0, structure))
-
+        raise ValueError(f"no termination slab could be generated for Miller indices {miller}")
     return out
+
+
+def _flatten_terminations(raw_terms):
+    """Normalize ``(index, structure)`` pairs from the termination enumeration."""
+    terms = []
+    for item in raw_terms:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            idx, slab = item
+            if isinstance(slab, (list, tuple)):
+                slab = slab[0]  # unpack nested (slab, metadata)
+            terms.append((idx, slab))
+        else:
+            terms.append((0, item))
+    return terms
 
 
 def _make_slabs(substrate, film, config: CoherentInterfaceConfig):
     """Build substrate / film slabs for every termination.
 
-    Returns two lists of ``(termination_index, structure)``.
+    Returns two lists of ``(termination_index, structure)``.  When
+    ``symmetric_slabs`` is forced, every termination becomes a
+    mirror-symmetric board (same termination on both surfaces) whose
+    finished thickness respects ``min_thickness``.
     """
-    sub_terms_raw = _get_terminations(substrate, config.substrate_miller)
-    film_terms_raw = _get_terminations(film, config.film_miller)
-
-    # Flatten: _get_terminations may return (idx, (slab, ...)) or (idx, slab)
-    sub_terms = []
-    for item in sub_terms_raw:
-        if isinstance(item, (list, tuple)) and len(item) == 2:
-            idx, slab = item
-            if isinstance(slab, (list, tuple)):
-                slab = slab[0]  # unpack nested (slab, metadata)
-            sub_terms.append((idx, slab))
-        else:
-            sub_terms.append((0, item))
-
-    film_terms = []
-    for item in film_terms_raw:
-        if isinstance(item, (list, tuple)) and len(item) == 2:
-            idx, slab = item
-            if isinstance(slab, (list, tuple)):
-                slab = slab[0]
-            film_terms.append((idx, slab))
-        else:
-            film_terms.append((0, item))
-
+    symmetric = config.symmetric_slabs
+    sides = (
+        (substrate, config.substrate_miller),
+        (film, config.film_miller),
+    )
+    if symmetric is True:
+        terms = [_symmetric_terminations(bulk, miller, config) for bulk, miller in sides]
+    else:
+        terms = [
+            _flatten_terminations(
+                _get_terminations(bulk, miller, config.min_thickness, config.vacuum_thickness)
+            )
+            for bulk, miller in sides
+        ]
     if not config.relax_terminations:
-        sub_terms = sub_terms[:1]
-        film_terms = film_terms[:1]
+        terms = [side[:1] for side in terms]
+    return terms[0], terms[1]
 
-    return sub_terms, film_terms
+
+def _symmetric_terminations(bulk, miller, config: CoherentInterfaceConfig):
+    """Mirror-symmetric boards for every termination of one surface.
+
+    Routed through :func:`make_symmetric_slab` rather than mirroring the
+    enumerated half-cut boards directly: pymatgen counts
+    ``min_slab_size`` in whole atomic planes, so a half-cut board mirrored
+    about its top plane lands roughly ``2 * d_hkl`` short of the requested
+    thickness (at the default ``min_thickness`` a Cu(001) board would come
+    out 3.6 A instead of 6.0 A).  The bounded thickening loop inside
+    :func:`make_symmetric_slab` is what makes the finished board respect
+    ``min_thickness``.
+    """
+    n_cuts = len(
+        _flatten_terminations(
+            _get_terminations(bulk, miller, config.min_thickness / 2.0, config.vacuum_thickness)
+        )
+    )
+    return [
+        (
+            idx,
+            make_symmetric_slab(
+                bulk,
+                miller,
+                termination=idx,
+                min_thickness=config.min_thickness,
+                vacuum=config.vacuum_thickness,
+            ).structure,
+        )
+        for idx in range(n_cuts)
+    ]
 
 
 def _supercell_transform(matrix: np.ndarray) -> tuple[tuple[int, int], tuple[int, int]]:
@@ -249,6 +375,20 @@ def _multiplicity(transform) -> int:
         return max(abs(int(rows[0]) * int(rows[1])), 1)
     (a, b), (c, d) = rows
     return max(abs(int(a) * int(d) - int(b) * int(c)), 1)
+
+
+def _format_matrix(matrix) -> str:
+    """Format a 2x2 supercell matrix as an unambiguous, filename-safe string.
+
+    The determinant alone cannot identify a supercell (det = 1, 2, 3 covers
+    both ``1x1``/``2x2``/``3x3`` diagonal cells and rotated cells such as
+    ``sqrt(2) x sqrt(2) R45deg``), which is how duplicate ``interface_id``
+    values used to collide.  The full integer matrix is written with ``_``
+    delimiters so no two distinct matrices can produce the same label
+    (``((11, 0), (0, 1))`` and ``((1, 10), (0, 1))`` stay distinguishable).
+    """
+    dense = np.rint(_dense_transform(matrix)).astype(int)
+    return "_".join(str(int(value)) for value in dense.ravel())
 
 
 def _match_lattices(
@@ -464,8 +604,13 @@ def _scale_in_plane(structure, transform):
     )
     slab = structure.copy()
     if "in_place" in inspect.signature(slab.make_supercell).parameters:
-        return slab.make_supercell(scaling, in_place=False)
-    return slab.make_supercell(scaling)
+        slab = slab.make_supercell(scaling, in_place=False)
+    else:
+        slab = slab.make_supercell(scaling)
+    # Slab.copy() in some pymatgen versions preserves site properties but
+    # drops Structure.properties, including the finite-slab provenance.
+    slab.properties.update(structure.properties)
+    return slab
 
 
 def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
@@ -505,6 +650,10 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         gap = float(getattr(config, "gap", gap))
         vacuum = float(getattr(config, "vacuum_thickness", vacuum))
 
+    if ANALYSIS_CHARGE not in substrate_slab.site_properties:
+        substrate_slab = _prepare_charge_structure(substrate_slab)
+    if ANALYSIS_CHARGE not in film_slab.site_properties:
+        film_slab = _prepare_charge_structure(film_slab)
     if match is not None:
         substrate_slab = _scale_in_plane(substrate_slab, match.substrate_supercell)
         film_slab = _scale_in_plane(film_slab, match.film_supercell)
@@ -553,13 +702,42 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
     top = float(np.max(all_coords[:, 2])) if len(all_coords) else 0.0
     sub_cell[2, 2] = top + vacuum
 
-    return Structure(
+    site_properties = {
+        key: list(substrate_slab.site_properties[key]) + list(film_slab.site_properties[key])
+        for key in (ANALYSIS_CHARGE, CHARGE_KNOWN, CHARGE_SOURCE)
+    }
+    site_properties[SLAB_ID] = [0] * len(substrate_slab) + [1] * len(film_slab)
+    interface = Structure(
         _Lattice(sub_cell),
         all_species,
         all_coords,
         coords_are_cartesian=True,
         to_unit_cell=False,
+        site_properties=site_properties,
     )
+    _attach_charge_geometry(interface, substrate_slab, film_slab, vacuum)
+    return interface
+
+
+def _attach_charge_geometry(interface, substrate_slab, film_slab, vacuum):
+    generated = all(
+        slab.properties.get("ai_slab_generated", False) for slab in (substrate_slab, film_slab)
+    )
+    height = float(interface.lattice.matrix[2, 2])
+    bottom = float(np.min(interface.cart_coords[:, 2]))
+    top = float(np.max(interface.cart_coords[:, 2]))
+    # The external interval connects the film top to the next substrate
+    # bottom. The internal interface gap is never used as a vacuum cut.
+    finite = bool(generated and vacuum > 0 and height > 0 and top - bottom < height)
+    interface.properties["charge_geometry"] = {
+        "normal_axis": 2,
+        "finite_slab": finite,
+        "vacuum_reference": [top / height, 1 + bottom / height] if finite else None,
+    }
+    interface.properties["charge_overridden_sources"] = {
+        side: slab.properties.get("charge_overridden_sources", [])
+        for side, slab in (("substrate", substrate_slab), ("film", film_slab))
+    }
 
 
 def _reduced_formula(structure) -> str:
@@ -593,6 +771,38 @@ def _to_ase(obj):
     return AseAtomsAdaptor.get_atoms(obj)
 
 
+def _warn_charge_diagnostics(analysis, config, sub_term_idx, film_term_idx):
+    """Surface polar or charge-imbalanced terminations without touching them.
+
+    ``symmetric_slabs="auto"`` must never transform a structure silently;
+    the warning names the termination pair and the explicit opt-in instead.
+    """
+    groups = analysis["groups"]
+    pair = f"{config.substrate_miller}:{sub_term_idx} / {config.film_miller}:{film_term_idx}"
+    if any(group["polarity"] == "polar" for group in groups.values()):
+        warnings.warn(
+            f"termination pair {pair} is polar (Tasker Type 3) under the supplied charge "
+            "model: an asymmetric board's normal dipole grows with thickness, so its surface "
+            "energy diverges. Re-run with symmetric_slabs=True (CLI: --symmetric) for a "
+            "mirror-symmetric board, or pair charge-compensating terminations.",
+            stacklevel=2,
+        )
+        return
+    charged = {
+        name: group["net_charge_e"]
+        for name, group in groups.items()
+        if group["neutrality"] == "charged"
+    }
+    if charged:
+        detail = ", ".join(f"{name} {charge:+.3f} e" for name, charge in charged.items())
+        warnings.warn(
+            f"termination pair {pair} carries net slab charges under the supplied charge "
+            f"model ({detail}); pair charge-compensating terminations or relax the charge "
+            "policy.",
+            stacklevel=2,
+        )
+
+
 def _to_candidate(
     interface,
     substrate_slab,
@@ -620,7 +830,6 @@ def _to_candidate(
     metadata = {
         "energy_per_area_ev_a2": energy_per_area,
         "energy_per_area_J_m2": energy_per_area_jm2,
-        "energy_per_area_jm2": energy_per_area_jm2,
         "builder": "coherent",
         "substrate_miller": config.substrate_miller,
         "film_miller": config.film_miller,
@@ -649,14 +858,47 @@ def _to_candidate(
     # strain -- as an earlier version did -- made a 2.6 % isotropic
     # mismatch show up as "0.0258 / 0.0000" with no relation to which
     # side actually carries it.
-    sub_sc = _multiplicity(match.substrate_supercell)
-    film_sc = _multiplicity(match.film_supercell)
+    atoms = _to_ase(interface)
+    if SLAB_ID not in atoms.arrays:
+        raise ValueError("assembled interface is missing per-atom slab identities")
+    tags = atoms.arrays[SLAB_ID]
+    n_substrate = int(np.count_nonzero(tags == 0))
+    n_film = int(np.count_nonzero(tags == 1))
+    if not n_substrate or not n_film or n_substrate + n_film != len(atoms):
+        raise ValueError("assembled interface must contain both slabs with valid identities")
+    analysis = analyze_charge_polarity(
+        atoms,
+        charge_tolerance=config.charge_tolerance,
+        dipole_tolerance=config.dipole_tolerance,
+    )
+    analysis["snapshot"] = "built_geometry"
+    analysis["side_overridden_sources"] = interface.properties.get("charge_overridden_sources", {})
+    metadata["charge_analysis"] = analysis
+    metadata["charge_geometry"] = dict(atoms.info.get("charge_geometry", {}))
+
+    # Tasker bookkeeping over the supplied charge model: 3 when any group is
+    # polar or charged, 1 when every group is neutral and nonpolar, else
+    # unknown.  The "auto" policy only warns; it never transforms.
+    tasker_type = tasker_classification(analysis)
+    metadata["tasker_type"] = tasker_type
+    metadata["polar"] = any(g["polarity"] == "polar" for g in analysis["groups"].values())
+    metadata["nominal_charge"] = analysis["groups"]["total"]["net_charge_e"]
+    metadata["symmetric"] = config.symmetric_slabs is True
+    analysis["tasker_type"] = tasker_type
+    analysis["polar"] = metadata["polar"]
+    analysis["nominal_charge_e"] = metadata["nominal_charge"]
+    analysis["symmetric"] = metadata["symmetric"]
+    if config.symmetric_slabs == "auto":
+        _warn_charge_diagnostics(analysis, config, sub_term_idx, film_term_idx)
+
+    sub_mat_str = _format_matrix(match.substrate_supercell)
+    film_mat_str = _format_matrix(match.film_supercell)
 
     return Candidate(
-        atoms=_to_ase(interface),
+        atoms=atoms,
         interface_id=(
             f"coherent:{config.substrate_miller}-{config.film_miller}"
-            f":{sub_term_idx}-{film_term_idx}:{sub_sc}x{film_sc}"
+            f":{sub_term_idx}-{film_term_idx}:sub{sub_mat_str}-film{film_mat_str}"
         ),
         builder_name="coherent",
         substrate_formula=_reduced_formula(substrate_slab),
@@ -668,8 +910,8 @@ def _to_candidate(
         strain_substrate=0.0,
         strain_film=match.strain,
         area=area,
-        n_substrate=len(substrate_slab),
-        n_film=len(film_slab),
+        n_substrate=n_substrate,
+        n_film=n_film,
         metadata=metadata,
     )
 
@@ -702,10 +944,11 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         self.config = config
         self.substrate = substrate
         self.film = film
+        self.last_build_report: dict = {}
 
     def validate(self) -> list[str]:
         """Validate the input pair before building."""
-        errors: list[str] = []
+        errors = self.config.validate()
 
         if self.substrate is None or self.film is None:
             errors.append("substrate and film structures must be provided")
@@ -719,10 +962,8 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         if np.linalg.det(film_lat) <= 0:
             errors.append("film lattice has non-positive volume")
 
-        if not (0.0 <= self.config.max_strain <= 1.0):
-            errors.append("max_strain must be in [0, 1]")
-        if self.config.max_area <= 0:
-            errors.append("max_area must be positive")
+        if not math.isfinite(self.config.max_area) or self.config.max_area <= 0:
+            errors.append("max_area must be finite and positive")
 
         if any(
             miller == (0, 0, 0)
@@ -732,10 +973,18 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
 
         return errors
 
+    def _prepared_slabs(self):
+        substrate = _prepare_charge_structure(
+            self.substrate, self.config.substrate_charges, self.config.substrate_oxidation
+        )
+        film = _prepare_charge_structure(
+            self.film, self.config.film_charges, self.config.film_oxidation
+        )
+        return _make_slabs(substrate, film, self.config)
+
     def list_terminations(self) -> dict[str, list[tuple[int, str]]]:
         """Enumerate terminations for both sides."""
-        sub_terms = _get_terminations(self.substrate, self.config.substrate_miller)
-        film_terms = _get_terminations(self.film, self.config.film_miller)
+        sub_terms, film_terms = self._prepared_slabs()
 
         def _describe(idx_structure_pairs):
             out = []
@@ -752,7 +1001,7 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         """Generate all strain-acceptable interface candidates."""
         return self.build_all()
 
-    def _match(self, strain_limit=None) -> list[_MatchInfo]:
+    def _match(self, strain_limit=None, slabs=None) -> list[_MatchInfo]:
         """Match the two slabs' in-plane cells.
 
         Matching must happen on the **slab** cells, not on the bulk
@@ -762,7 +1011,7 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         plane.  All terminations of one slab share the same lateral
         cell, so a single match covers every termination pair.
         """
-        sub_terms, film_terms = _make_slabs(self.substrate, self.film, self.config)
+        sub_terms, film_terms = self._prepared_slabs() if slabs is None else slabs
         return _match_lattices(
             sub_terms[0][1].lattice.matrix,
             film_terms[0][1].lattice.matrix,
@@ -784,47 +1033,86 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
 
         return self._match(strain_limit=math.inf)[: max(limit, 1)]
 
+    def _reset_build_report(self) -> None:
+        self.last_build_report = {
+            "charge_policy": self.config.charge_policy,
+            "thresholds": {
+                "charge_tolerance_e": self.config.charge_tolerance,
+                "dipole_tolerance_e_per_A": self.config.dipole_tolerance,
+            },
+            "attempted": 0,
+            "assembled": 0,
+            "assembly_failed": 0,
+            "analyzed": 0,
+            "kept": 0,
+            "rejected": 0,
+            "rejection_reasons": {},
+            "stopped_at_limit": False,
+            "empty_stage": None,
+        }
+
+    def _accept_charge(self, candidate: Candidate) -> bool:
+        report = self.last_build_report
+        report["analyzed"] += 1
+        analysis = candidate.metadata["charge_analysis"]
+        reasons = charge_rejection_reasons(analysis, self.config.charge_policy)
+        analysis["filter"] = {
+            "policy": self.config.charge_policy,
+            "accepted": not reasons,
+            "reasons": reasons,
+        }
+        if not reasons:
+            report["kept"] += 1
+            return True
+        report["rejected"] += 1
+        for reason in reasons:
+            counts = report["rejection_reasons"]
+            counts[reason] = counts.get(reason, 0) + 1
+        return False
+
     def build_all(self) -> list[Candidate]:
-        """Generate all strain-acceptable interface candidates."""
+        """Analyze geometric candidates and retain those passing the requested policy."""
+        self._reset_build_report()
         errors = self.validate()
         if errors:
             raise ValueError("; ".join(errors))
 
-        matches = self._match()
+        slabs = self._prepared_slabs()
+        matches = self._match(slabs=slabs)
         if not matches:
+            self.last_build_report["empty_stage"] = "no_matches"
             return []
-
-        sub_terms, film_terms = _make_slabs(self.substrate, self.film, self.config)
 
         candidates: list[Candidate] = []
         for match in matches:
-            for sub_idx, sub_slab in sub_terms:
-                for film_idx, film_slab in film_terms:
-                    try:
-                        interface = _assemble_interface(sub_slab, film_slab, match, self.config)
-                    except Exception:  # noqa: BLE001
-                        # A single bad termination must not abort the
-                        # whole enumeration.
-                        continue
-
-                    candidates.append(
-                        _to_candidate(
-                            interface=interface,
-                            substrate_slab=sub_slab,
-                            film_slab=film_slab,
-                            match=match,
-                            sub_term_idx=sub_idx,
-                            film_term_idx=film_idx,
-                            config=self.config,
-                        )
-                    )
-                    # Stop as soon as the cap is reached: building a
-                    # supercell is the expensive part, and matches are
-                    # already ranked best-first.
+            for sub_idx, sub_slab in slabs[0]:
+                for film_idx, film_slab in slabs[1]:
+                    candidate = self._build_candidate(match, sub_idx, sub_slab, film_idx, film_slab)
+                    if candidate is not None and self._accept_charge(candidate):
+                        candidates.append(candidate)
                     if len(candidates) >= self.config.max_candidates:
+                        self.last_build_report["stopped_at_limit"] = True
                         return candidates
 
+        if not candidates:
+            self.last_build_report["empty_stage"] = (
+                "charge_filter" if self.last_build_report["rejected"] else "assembly"
+            )
         return candidates
+
+    def _build_candidate(self, match, sub_idx, sub_slab, film_idx, film_slab):
+        report = self.last_build_report
+        report["attempted"] += 1
+        # Validate charge provenance outside the geometry error handler.
+        for slab in (sub_slab, film_slab):
+            _prepare_charge_structure(slab)
+        try:
+            interface = _assemble_interface(sub_slab, film_slab, match, self.config)
+        except Exception:  # noqa: BLE001
+            report["assembly_failed"] += 1
+            return None
+        report["assembled"] += 1
+        return _to_candidate(interface, sub_slab, film_slab, match, sub_idx, film_idx, self.config)
 
     def export_candidates(
         self,
