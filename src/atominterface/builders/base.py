@@ -8,6 +8,7 @@ consume Candidates -- never raw ASE Atoms.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -122,6 +123,13 @@ class Candidate:
                 "interface_area": self.area,
             },
         )
+        # Charge diagnostics are a construction-time snapshot, not a live
+        # validation of coordinates changed by a subsequent relaxation.
+        for key in ("charge_analysis", "charge_geometry"):
+            if key in self.metadata:
+                info[key] = deepcopy(self.metadata[key])
+        info["n_substrate"] = self.n_substrate
+        info["n_film"] = self.n_film
         self.atoms.info = info
         return self.atoms
 
