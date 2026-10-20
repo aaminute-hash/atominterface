@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -142,7 +143,7 @@ def test_fallback_matches_rejects_large_area(cubic_structure):
 
 def test_to_candidate_attaches_metadata(dummy_match, cubic_structure):
     candidate = _to_candidate(
-        interface=cubic_structure,
+        interface=_assemble_interface(cubic_structure, cubic_structure, dummy_match),
         substrate_slab=cubic_structure,
         film_slab=cubic_structure,
         match=dummy_match,
@@ -170,7 +171,7 @@ def test_to_candidate_attaches_metadata(dummy_match, cubic_structure):
 
 def test_to_candidate_interface_id_encoding(dummy_match, cubic_structure):
     candidate = _to_candidate(
-        interface=cubic_structure,
+        interface=_assemble_interface(cubic_structure, cubic_structure, dummy_match),
         substrate_slab=cubic_structure,
         film_slab=cubic_structure,
         match=dummy_match,
@@ -191,7 +192,7 @@ def test_to_candidate_energy_per_area_conversion(cubic_structure):
 
     # Patch a fake energy onto the structure so the conversion path
     # is exercised without invoking a calculator.
-    interface = cubic_structure.copy()
+    interface = _assemble_interface(cubic_structure, cubic_structure)
     interface.energy = 3.2
 
     candidate = _to_candidate(
@@ -211,8 +212,8 @@ def test_to_candidate_energy_per_area_conversion(cubic_structure):
     )
 
     expected = 3.2 / area
-    assert abs(candidate.metadata["energy_per_area_ev_a2"] - expected) < 1e-12
-    assert candidate.metadata["energy_per_area_jm2"] == pytest.approx(
+    assert candidate.metadata["energy_per_area_ev_a2"] == pytest.approx(expected, rel=1e-12)
+    assert candidate.metadata["energy_per_area_J_m2"] == pytest.approx(
         expected * 16.02176634, rel=1e-6
     )
 
@@ -364,7 +365,7 @@ def test_list_terminations(fcc_structure):
 
 def test_export_candidates_writes_files(fcc_structure, tmp_path):
     candidate = _to_candidate(
-        interface=fcc_structure,
+        interface=_assemble_interface(fcc_structure, fcc_structure),
         substrate_slab=fcc_structure,
         film_slab=fcc_structure,
         match=_MatchInfo(
@@ -469,7 +470,7 @@ def test_rotation_is_recorded_when_present(fcc_structure):
     rotation = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=np.float64)
 
     candidate = _to_candidate(
-        interface=fcc_structure,
+        interface=_assemble_interface(fcc_structure, fcc_structure),
         substrate_slab=fcc_structure,
         film_slab=fcc_structure,
         match=_MatchInfo(
@@ -507,7 +508,10 @@ def test_registration_on_import():
 
 def _fcc(species: str, a: float):
     """Conventional fcc cell, as a bulk input for the coherent builder."""
-    from pymatgen.core import Lattice, Structure  # noqa: WPS433
+    try:
+        from pymatgen.core import Lattice, Structure  # noqa: WPS433
+    except ImportError:
+        pytest.skip("pymatgen not installed")
 
     return Structure(
         Lattice.cubic(a),
@@ -557,7 +561,9 @@ def test_build_prefers_the_smallest_equally_good_cell():
 
     assert len(candidates) == 1
     candidate = candidates[0]
-    assert candidate.total_atoms == 4
+    # Real slabs, not the historical 1 A stubs: min_thickness=6.0 cuts four
+    # (001) planes per side at the theoretical spacing a/2.
+    assert candidate.total_atoms == 8
     # fcc(001) primitive 2D cell of Cu: a^2 / 2.
     assert candidate.area == pytest.approx(3.615**2 / 2, rel=1e-6)
     # Strain applied *to the film*: (a_Cu - a_Ni) / a_Ni.
@@ -599,3 +605,390 @@ def test_preview_matches_ignores_the_strain_cutoff():
     # The closest match is the 2.6 % isotropic Cu/Ni mismatch.
     assert preview[0].strain == pytest.approx(3.615 / 3.524 - 1, rel=1e-3)
     assert preview[0].shear_strain == pytest.approx(0.0, abs=1e-6)
+
+
+def _charged_builder(**overrides):
+    config = dict(
+        max_area=15.0,
+        max_candidates=1,
+        substrate_oxidation={"Cu": 0},
+        film_oxidation={"Ni": 0},
+    )
+    config.update(overrides)
+    return CoherentInterfaceBuilder(
+        _fcc("Cu", 3.6), _fcc("Ni", 3.6), CoherentInterfaceConfig(**config)
+    )
+
+
+def test_charge_default_report_keeps_unknown_candidates():
+    builder = _charged_builder(substrate_oxidation=None, film_oxidation=None)
+    candidates = builder.build()
+    assert len(candidates) == 1
+    analysis = candidates[0].metadata["charge_analysis"]
+    assert analysis["groups"]["total"]["neutrality"] == "unknown"
+    assert analysis["filter"]["accepted"] is True
+    assert builder.last_build_report["kept"] == 1
+
+
+def test_charge_nonpolar_builder_preserves_input_and_snapshot():
+    builder = _charged_builder(charge_policy="require-nonpolar")
+    before = builder.substrate.as_dict()
+    candidate = builder.build()[0]
+    assert builder.substrate.as_dict() == before
+    assert candidate.n_substrate + candidate.n_film == candidate.total_atoms
+    analysis = candidate.metadata["charge_analysis"]
+    assert all(g["polarity"] == "nonpolar" for g in analysis["groups"].values())
+    assert analysis["snapshot"] == "built_geometry"
+    assert candidate.atoms.calc is None
+    assert not candidate.atoms.has("initial_charges")
+    atoms = candidate.to_atoms()
+    assert atoms.info["charge_analysis"] == analysis
+    atoms.info["charge_analysis"]["snapshot"] = "changed"
+    assert analysis["snapshot"] == "built_geometry"
+
+
+@pytest.mark.parametrize("policy", ["require-neutral", "require-nonpolar"])
+def test_unknown_charge_cannot_pass_strict_builder(policy):
+    builder = _charged_builder(charge_policy=policy, substrate_oxidation=None, film_oxidation=None)
+    assert builder.build() == []
+    report = builder.last_build_report
+    assert report["empty_stage"] == "charge_filter"
+    assert report["rejected"] > 0
+    assert any("unknown" in reason for reason in report["rejection_reasons"])
+    assert report["kept"] == 0
+    assert not report["stopped_at_limit"]
+
+
+def test_opposite_slab_charges_do_not_pass_neutral_filter():
+    builder = _charged_builder(
+        charge_policy="require-neutral", substrate_oxidation={"Cu": 1}, film_oxidation={"Ni": -1}
+    )
+    assert builder.build() == []
+    assert any("substrate" in reason for reason in builder.last_build_report["rejection_reasons"])
+
+
+def test_no_vacuum_cannot_pass_nonpolar_filter():
+    builder = _charged_builder(charge_policy="require-nonpolar", vacuum_thickness=0)
+    assert builder.build() == []
+    assert builder.last_build_report["empty_stage"] == "charge_filter"
+
+
+def test_build_charge_counts_reset_between_calls():
+    builder = _charged_builder()
+    builder.build()
+    first = dict(builder.last_build_report)
+    builder.build()
+    assert builder.last_build_report == first
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"charge_policy": "guess"},
+        {"charge_tolerance": float("nan")},
+        {"dipole_tolerance": -1},
+        {"substrate_charges": (0,)},
+        {"substrate_oxidation": {"Cu": float("inf")}},
+        {"vacuum_dir": 0},
+    ],
+)
+def test_invalid_charge_config_fails_before_matching(options):
+    builder = _charged_builder(**options)
+    with patch.object(builder, "_match") as matching, pytest.raises(ValueError):
+        builder.build()
+    matching.assert_not_called()
+
+
+def test_charge_arrays_and_counts_survive_unequal_supercells():
+    from atominterface.builders.coherent import _prepare_charge_structure
+
+    sub = _prepare_charge_structure(_fcc("Cu", 3.6), charges=(1, -1, 2, -2))
+    film = _prepare_charge_structure(_fcc("Ni", 3.6), oxidation_states={"Ni": 0})
+    match = _MatchInfo(25.92, ((1, -1), (1, 1)), (1, 1), 0, 0)
+    interface = _assemble_interface(sub, film, match)
+    candidate = _to_candidate(interface, sub, film, match, 0, 0, CoherentInterfaceConfig())
+    assert candidate.n_substrate == 8
+    assert candidate.n_film == 4
+    assert candidate.total_atoms == 12
+    arrays = candidate.atoms.arrays
+    assert arrays["ai_slab_id"].tolist() == [0] * 8 + [1] * 4
+    assert sorted(arrays["ai_charge"][:8]) == sorted([1, -1, 2, -2] * 2)
+    assert set(arrays["ai_charge_source"][:8]) == {"explicit_charges"}
+    assert arrays["ai_charge_known"].all()
+    assert len(sub) == len(film) == 4
+
+
+def test_mixed_valence_survives_slab_generation_and_keeps_distinct_cuts():
+    from atominterface.builders.charge import (
+        ANALYSIS_CHARGE,
+        CHARGE_KNOWN,
+        CHARGE_SOURCE,
+    )
+    from atominterface.builders.coherent import _get_terminations
+
+    try:
+        from pymatgen.core import Lattice, Structure
+    except ImportError:
+        pytest.skip("pymatgen not installed")
+
+    # Same species, different formal charges: species-only symmetry would
+    # merge the (111) cuts, so the charge-aware enumeration must keep the
+    # terminations apart instead of silently collapsing them.
+    bulk = Structure(Lattice.cubic(4.0), ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    bulk.add_site_property(ANALYSIS_CHARGE, [1.0, -1.0])
+    bulk.add_site_property(CHARGE_KNOWN, [True, True])
+    bulk.add_site_property(CHARGE_SOURCE, ["explicit_charges"] * 2)
+
+    terms = _get_terminations(bulk, (1, 1, 1), 6.0, 10.0)
+    assert len(terms) >= 1
+
+    # Check if we got distinct charge sequences if multiple terminations exist.
+    if len(terms) >= 2:
+        sequences = []
+        for _, slab in terms:
+            order = np.argsort(slab.cart_coords[:, 2])
+            sequences.append(np.asarray(slab.site_properties[ANALYSIS_CHARGE])[order].tolist())
+
+        found_distinct = any(
+            sequences[i] != sequences[j]
+            for i in range(len(sequences))
+            for j in range(i + 1, len(sequences))
+        )
+        assert found_distinct, f"All terminations have same charge sequence: {sequences[0]}"
+
+
+def test_species_zero_oxidation_states_remain_known_after_conversion():
+    sub, film = _fcc("Cu", 3.6), _fcc("Ni", 3.6)
+    sub.add_oxidation_state_by_element({"Cu": 0})
+    film.add_oxidation_state_by_element({"Ni": 0})
+    builder = CoherentInterfaceBuilder(
+        sub, film, CoherentInterfaceConfig(max_area=15, max_candidates=1)
+    )
+    candidate = builder.build()[0]
+    assert candidate.atoms.arrays["ai_charge_known"].all()
+    assert candidate.metadata["charge_analysis"]["groups"]["total"]["neutrality"] == "neutral"
+    assert not candidate.atoms.has("initial_charges")
+
+
+def test_bulk_fallback_is_not_certified_as_finite_slab():
+    """A failed slab cut must raise, never masquerade as a finite slab.
+
+    The builder used to hand the bulk structure back when the slab
+    generator failed; the bulk then flowed into the charge analysis as if
+    it were a finite board.  The failure now propagates as a
+    ``ValueError`` naming the Miller indices, and nothing is attempted.
+    """
+    builder = _charged_builder(charge_policy="require-nonpolar")
+    with (
+        patch("pymatgen.core.surface.SlabGenerator", side_effect=RuntimeError("bad slab")),
+        pytest.raises(ValueError, match=r"\(0, 0, 1\)"),
+    ):
+        builder.build()
+    assert builder.last_build_report["attempted"] == 0
+
+
+def test_candidate_limit_counts_kept_not_rejected():
+    from atominterface.builders.coherent import _prepare_charge_structure
+
+    builder = _charged_builder(charge_policy="require-neutral")
+    neutral = _prepare_charge_structure(_fcc("Cu", 3.6), oxidation_states={"Cu": 0})
+    charged = _prepare_charge_structure(_fcc("Cu", 3.6), oxidation_states={"Cu": 1})
+    film = _prepare_charge_structure(_fcc("Ni", 3.6), oxidation_states={"Ni": 0})
+    terms = ([(0, charged), (1, neutral)], [(0, film)])
+    match = _MatchInfo(12.96, (1, 1), (1, 1), 0, 0)
+    with (
+        patch.object(builder, "_prepared_slabs", return_value=terms),
+        patch.object(builder, "_match", return_value=[match]),
+    ):
+        candidates = builder.build()
+    assert len(candidates) == 1
+    assert candidates[0].substrate_termination == "1"
+    assert builder.last_build_report["attempted"] == 2
+    assert builder.last_build_report["rejected"] == 1
+    assert builder.last_build_report["kept"] == 1
+
+
+def test_pymatgen_site_charge_is_resolved_without_calculator():
+    sub, film = _fcc("Cu", 3.6), _fcc("Ni", 3.6)
+    sub.add_site_property("charge", [0] * 4)
+    film.add_site_property("charge", [0] * 4)
+    builder = CoherentInterfaceBuilder(
+        sub, film, CoherentInterfaceConfig(max_area=15, max_candidates=1)
+    )
+    candidate = builder.build()[0]
+    assert candidate.metadata["charge_analysis"]["groups"]["total"]["sources"] == [
+        "initial_charges"
+    ]
+    assert candidate.atoms.calc is None
+    assert not candidate.atoms.has("initial_charges")
+    assert sub.site_properties["charge"] == [0] * 4
+
+
+def _rocksalt():
+    """Rocksalt with formal charges, as a bulk input for slab generation."""
+    try:
+        from pymatgen.core import Lattice, Structure  # noqa: WPS433
+    except ImportError:
+        pytest.skip("pymatgen not installed")
+
+    return Structure(
+        Lattice.cubic(5.64),
+        ["Na+", "Cl-"] * 4,
+        [
+            [0, 0, 0],
+            [0.5, 0.5, 0.5],
+            [0, 0.5, 0.5],
+            [0.5, 0, 0],
+            [0.5, 0, 0.5],
+            [0, 0.5, 0],
+            [0.5, 0.5, 0],
+            [0, 0, 0.5],
+        ],
+    )
+
+
+def _normal_planes(structure):
+    """Atomic-plane levels and per-plane species along the slab's own normal."""
+    matrix = np.asarray(structure.lattice.matrix, dtype=float)
+    normal = np.cross(matrix[0], matrix[1])
+    normal = normal / np.linalg.norm(normal)
+    projected = np.asarray(structure.cart_coords, dtype=float) @ normal
+    levels = np.unique(np.round(projected, 4))
+    symbols = [site.specie.symbol for site in structure.sites]
+    sequence = [
+        "+".join(sorted(symbols[i] for i in np.flatnonzero(np.abs(projected - level) < 1e-3)))
+        for level in levels
+    ]
+    return levels, sequence
+
+
+def test_config_validates_symmetric_slabs_option():
+    errors = CoherentInterfaceConfig(symmetric_slabs="banana").validate()
+    assert any("symmetric_slabs" in error for error in errors)
+    for value in ("auto", True, False):
+        accepted = CoherentInterfaceConfig(symmetric_slabs=value).validate()
+        assert not any("symmetric_slabs" in error for error in accepted)
+
+
+def test_make_slabs_symmetric_boards_respect_min_thickness():
+    """Forced-symmetric boards must not come out thinner than requested.
+
+    pymatgen spends ``min_slab_size`` in whole oriented-cell repeats, so a
+    plain mirror of a half-cut board lands about ``2 * d_hkl`` short (at the
+    default 6.0 A a Cu(001) board would be 3.6 A); the builder routes the
+    forced path through the thickening loop instead.
+    """
+    config = CoherentInterfaceConfig(symmetric_slabs=True, min_thickness=6.0)
+    sub_terms, film_terms = _make_slabs(_fcc("Cu", 3.615), _fcc("Ni", 3.524), config)
+
+    for side in (sub_terms, film_terms):
+        assert side
+        for _, slab in side:
+            levels, sequence = _normal_planes(slab)
+            assert levels[-1] - levels[0] >= config.min_thickness - 1e-9
+            assert sequence == sequence[::-1]
+            assert slab.properties.get("ai_slab_generated") is True
+
+
+def test_make_slabs_symmetric_respects_relax_terminations():
+    config = CoherentInterfaceConfig(symmetric_slabs=True, relax_terminations=False)
+    sub_terms, film_terms = _make_slabs(_fcc("Cu", 3.615), _fcc("Ni", 3.524), config)
+    assert len(sub_terms) == len(film_terms) == 1
+
+
+def _polar_builder(**overrides):
+    config = dict(
+        substrate_miller=(1, 1, 1),
+        film_miller=(1, 1, 1),
+        max_area=50.0,
+        max_candidates=1,
+        substrate_oxidation={"Na": 1, "Cl": -1},
+        film_oxidation={"Na": 1, "Cl": -1},
+    )
+    config.update(overrides)
+    return CoherentInterfaceBuilder(_rocksalt(), _rocksalt(), CoherentInterfaceConfig(**config))
+
+
+def test_build_auto_mode_warns_about_polar_termination_without_transforming():
+    builder = _polar_builder(symmetric_slabs="auto")
+    with pytest.warns(UserWarning, match="Tasker Type 3") as caught:
+        candidates = builder.build()
+
+    assert any("--symmetric" in str(warning.message) for warning in caught)
+    candidate = candidates[0]
+    # "auto" only warns: the geometry is untouched.
+    assert candidate.metadata["polar"] is True
+    assert candidate.metadata["tasker_type"] == 3
+    assert candidate.metadata["symmetric"] is False
+    assert candidate.metadata["nominal_charge"] == 0.0
+
+
+def test_build_symmetric_true_transforms_and_marks_candidates():
+    builder = _polar_builder(symmetric_slabs=True)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build()
+
+    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+    candidate = candidates[0]
+    assert candidate.metadata["symmetric"] is True
+    # A mirror-symmetric board has no net normal dipole.
+    assert candidate.metadata["polar"] is False
+    # ...but the Tasker bookkeeping stays honest: both boards are charged.
+    assert candidate.metadata["tasker_type"] == 3
+    assert candidate.metadata["nominal_charge"] == pytest.approx(-2.0)
+
+
+def test_build_symmetric_false_is_silent_and_untransformed():
+    builder = _polar_builder(symmetric_slabs=False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build()
+
+    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+    assert candidates[0].metadata["symmetric"] is False
+    assert candidates[0].metadata["polar"] is True
+
+
+def test_warn_charge_diagnostics_reports_charge_imbalance():
+    """Charged but nonpolar sides get their own warning, not the polar one."""
+    from atominterface.builders.coherent import _warn_charge_diagnostics
+
+    analysis = {
+        "groups": {
+            "total": {"neutrality": "neutral", "polarity": "nonpolar", "net_charge_e": 0.0},
+            "substrate": {"neutrality": "charged", "polarity": "nonpolar", "net_charge_e": 2.0},
+            "film": {"neutrality": "charged", "polarity": "nonpolar", "net_charge_e": -2.0},
+        }
+    }
+    config = CoherentInterfaceConfig(substrate_miller=(0, 0, 1), film_miller=(0, 0, 1))
+    with pytest.warns(UserWarning, match=r"substrate \+2\.000 e"):
+        _warn_charge_diagnostics(analysis, config, 0, 0)
+
+
+def test_warn_charge_diagnostics_stays_silent_for_neutral_nonpolar():
+    from atominterface.builders.coherent import _warn_charge_diagnostics
+
+    neutral = {
+        "neutrality": "neutral",
+        "polarity": "nonpolar",
+        "net_charge_e": 0.0,
+    }
+    analysis = {"groups": {"total": neutral, "substrate": neutral, "film": neutral}}
+    config = CoherentInterfaceConfig()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _warn_charge_diagnostics(analysis, config, 0, 0)
+    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+
+
+def test_interface_ids_are_unique_across_candidates():
+    """The full matrix encoding must not collide between supercells."""
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615),
+        film=_fcc("Ni", 3.524),
+        config=CoherentInterfaceConfig(max_candidates=6),
+    )
+    candidates = builder.build()
+    assert len(candidates) > 1
+    assert len({candidate.interface_id for candidate in candidates}) == len(candidates)
