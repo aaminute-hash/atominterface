@@ -190,17 +190,19 @@ class GuardedRelaxer:
         raise ValueError(f"unknown optimizer {self.optimizer!r}")
 
     def _aggregate(self, atoms, forces: np.ndarray) -> WatchResult:  # noqa: D401
-        scores, reasons = [], []
-        for w in self.watchers:
-            r = w(atoms, forces)
-            scores.append(r.score)
-            if r.reason:
-                reasons.append(r.reason)
+        # Keep every watcher's full result: the reason reported for the
+        # winning watcher must come from that same watcher.  The old
+        # code indexed a reasons list compacted to non-empty entries,
+        # so any empty-reason watcher ahead of the argmax shifted the
+        # index (and an all-empty prefix raised IndexError, aborting
+        # the relaxation as relax_exception).
+        results = [w(atoms, forces) for w in self.watchers]
+        scores = [r.score for r in results]
         if self.stop_on == "any":
             idx = int(np.argmax(scores))
-            return WatchResult(score=float(scores[idx]), reason=reasons[idx] if reasons else "")
+            return WatchResult(score=float(scores[idx]), reason=results[idx].reason)
         score = float(np.mean(scores))
-        return WatchResult(score=score, reason="; ".join(reasons))
+        return WatchResult(score=score, reason="; ".join(r.reason for r in results if r.reason))
 
     @staticmethod
     def _worst_atom(watch: WatchResult, atoms) -> int:  # noqa: D401

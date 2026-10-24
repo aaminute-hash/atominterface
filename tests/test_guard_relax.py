@@ -18,6 +18,7 @@ from atominterface.relax.watchers import (
     CommitteeWatcher,
     ForceNormWatcher,
     NeighborWatcher,
+    WatchResult,
 )
 
 _GRID = np.stack(np.meshgrid([2.5, 5.0, 7.5], [2.5, 5.0, 7.5], [2.5, 5.0, 7.5]), axis=-1).reshape(
@@ -444,3 +445,90 @@ def test_from_calculators_validates_arguments():
         GuardedRelaxer.from_calculators([])
     with pytest.raises(ValueError, match="out of range"):
         GuardedRelaxer.from_calculators([_CalcWith(np.zeros((5, 3)))], primary=3)
+
+
+# ------------------------------------------------------------------
+# Aggregate reason alignment
+#
+# Regression tests for the reasons-index bug: _aggregate used to
+# index a reasons list compacted to non-empty entries with the argmax
+# watcher's position, so any empty-reason watcher ahead of the winner
+# shifted the reported reason -- and an all-empty prefix raised
+# IndexError, which run() swallowed as relax_exception.
+# ------------------------------------------------------------------
+def test_aggregate_reason_aligns_with_forcenorm_watcher():
+    """scores=[0, 0.9]: the reason must come from the ForceNormWatcher."""
+    atoms = make_atoms(5)
+    relaxer = GuardedRelaxer(calculator=get_calculator("dummy"), stop_on="any")
+    # per-atom force norm 90 -> ForceNormWatcher score 90/100 = 0.9
+    forces = np.ones((5, 3)) * (90.0 / np.sqrt(3.0))
+    watch = relaxer._aggregate(atoms, forces)
+    assert watch.score == pytest.approx(0.9)
+    assert "max_force_norm" in watch.reason
+
+
+def test_aggregate_argmax_watcher_without_reason():
+    """A loud low-score watcher ahead of a silent winner must not shift it."""
+    atoms = make_atoms(5)
+
+    class _LoudLowWatcher:
+        def __call__(self, atoms, forces):
+            return WatchResult(score=0.3, reason="low_but_loud")
+
+    class _SilentHighWatcher:
+        def __call__(self, atoms, forces):
+            return WatchResult(score=0.95, reason="")
+
+    relaxer = GuardedRelaxer(
+        calculator=get_calculator("dummy"),
+        watchers=[_LoudLowWatcher(), _SilentHighWatcher()],
+        stop_on="any",
+    )
+    watch = relaxer._aggregate(atoms, np.zeros((5, 3)))
+    assert watch.score == pytest.approx(0.95)
+    assert watch.reason == ""
+
+
+def test_guarded_relaxer_flags_high_forces_without_index_error(tmp_path):
+    """End-to-end on the pre-existing crash path (no committee involved).
+
+    ForceNormWatcher alone over threshold used to abort the relaxation
+    with relax_exception=IndexError; the guard must quarantine instead.
+    """
+    atoms = make_atoms(5)
+    relaxer = GuardedRelaxer(
+        calculator=_CalcWith(np.ones((5, 3)) * 90.0),
+        max_steps=5,
+        ood_threshold=0.5,
+        quarantine_dir=tmp_path,
+    )
+    result = relaxer.run(atoms)
+    assert result.ood_triggered is True
+    assert result.ood_step >= 0
+    assert any("max_force_norm" in reason for reason in result.reasons)
+    assert result.quarantine_path != ""
+    assert list(tmp_path.iterdir())
+
+
+def test_guarded_relaxer_committee_argmax_on_any_stop_on(tmp_path):
+    """stop_on='any' (the default): committee as the winning watcher.
+
+    The committee scores highest by design, so this is the path the
+    default configuration exercises -- it must report the committee
+    reason and quarantine, not die on reasons[idx].
+    """
+    atoms = make_atoms(5)
+    relaxer = GuardedRelaxer(
+        calculator=_CalcWith(np.ones((5, 3)) * 0.01),
+        committee_calculators=[_CalcWith(np.ones((5, 3)) * 100.0)],
+        max_steps=5,
+        ood_threshold=0.8,
+        quarantine_dir=tmp_path,
+    )
+    result = relaxer.run(atoms)
+    assert result.ood_triggered is True
+    assert result.ood_step >= 0
+    assert result.max_ood_score == pytest.approx(1.0)
+    assert result.reasons == ["committee_disagreement"]
+    assert result.quarantine_path != ""
+    assert list(tmp_path.iterdir())
