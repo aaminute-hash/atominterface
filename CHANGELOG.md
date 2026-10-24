@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-10-25
 
 ### Added
 - `atominterface build` now works end to end: loads a substrate/film pair,
@@ -12,6 +12,22 @@
 - `in_plane_mismatch()` / `max_stretch_strain()` / `max_shear_strain()`:
   2D engineering strain for surface cells.
 - Example input structures `examples/data/{Cu,Ni}_fcc.vasp`.
+- `atominterface build` gains `--backend` / `--device` / `--relax`: the
+  real uMLIP backends (MACE-MP-0 medium, CHGNet) load pretrained weights
+  by default, and the resolved model identity is recorded in
+  `provenance.RunMeta.model_hash`.
+- `examples/03_interface_energy.py`: end-to-end Cu(001) | Ni(001)
+  interface formation energy — bulk single points, reference slabs,
+  guarded relaxation, termination energies, gamma_int.
+- `candidates.csv` now reports both gamma unit conventions (eV/A^2 and
+  J/m^2) and the OOD trace (`ood_score`, `ood_step`, `ood_triggered`).
+- `CommitteeWatcher` is mounted in `GuardedRelaxer`'s default watcher
+  chain whenever `committee_calculators` is passed.
+- `atominterface.io.canonicalize_arrays()`: sorts `atoms.arrays` keys so
+  extxyz column order (and file bytes) no longer drift with
+  `PYTHONHASHSEED`.
+- `docs/validation_cu_ni_001.md`: thickness/vacuum convergence scans,
+  literature comparison and an uncertainty budget for gamma_int.
 
 ### Changed
 - **Strain metric is now two-dimensional.** The old code folded the vacuum
@@ -54,6 +70,32 @@
   integer transformation matrix.
 - The quickstart example took over 5 minutes because it asked pymatgen's
   ZSL for 600 A^2 interfaces; it is now 8 seconds and exposes `--max-area`.
+- **Termination energies were referenced to the pristine bulk.** A
+  coherent slab carries the interface's in-plane lattice, so the film
+  side is strained (Cu/Ni: +2.58 %) while the substrate is not;
+  referencing it against the unstrained bulk left `n * dE_strain` in the
+  termination energy, a term that grows with layer count. gamma_Ni
+  drifted 2.00 -> 2.10 J/m^2 across the thickness scan instead of
+  converging. The reference is now the *coherent* bulk (in-plane locked
+  to the slab strain, out-of-plane relaxed by a local three-point
+  parabola fit — a fit across the whole grid is biased by anharmonicity
+  and reported +0.57 meV/atom of spurious Cu relaxation gain where a
+  dense scan finds +0.35). gamma_Ni spread over 6 -> 14 Ni layers:
+  0.1031 -> 0.0030 J/m^2.
+- `examples/03_interface_energy.py --fmax` default 0.05 -> 0.01 eV/A. At
+  0.05 the force driving a Cu slab's out-of-plane expansion sits at the
+  tolerance itself, so the slab interior never reached the spacing the
+  bulk reference assumes (measured central interlayer spacing 1.8075 A
+  vs a bulk optimum of 1.8219 A).
+- `GuardedRelaxer._aggregate` reported the wrong watcher's reason. It
+  indexed a reasons list compacted to non-empty entries, so any
+  empty-reason watcher ahead of the argmax shifted the index
+  (misattributing the reason), and an all-empty prefix raised
+  `IndexError`, which surfaced as `relax_exception`. The reason now comes
+  from the watcher that won the argmax.
+- The dummy backend rejected ASE 3.29's `force_consistent=True` kwarg.
+- `provenance` could emit a non-plain `str` for the torch version, which
+  PyYAML refused to represent.
 
 ## [0.1.0] - 2026-10-17
 
