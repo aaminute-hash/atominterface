@@ -261,6 +261,12 @@ python examples/03_interface_energy.py --backend mace --device cpu \
     --min-thickness 14.4 --outdir outputs/energy_cu_ni
 ```
 
+14.4 Å is also the *default*: the demo used to default to 6.0 Å, which
+cuts only 4 Cu / 4 Ni layers and reports γ_Ni = 1.979 J/m² and γ_int =
+0.041 J/m² — 3 % and 30 % away from the plateau above. Slabs thinner
+than ~6 Ni layers are not on the plateau, so the flag must not be
+lowered without re-running this table.
+
 `--min-thickness` 7.2 / 10.8 / 14.4 / 18.0 / 21.6 for the thickness
 scan, `--vacuum` 10 / 15 / 20 / 25 at `--min-thickness 14.4` for the
 vacuum scan. Regression tests live in

@@ -54,6 +54,12 @@
   The old 3.9-3.12 matrix could not stay green: pymatgen 2026.10 requires
   >= 3.11 and numpy 2.5 requires >= 3.12, while the mypy 1.x resolved on
   3.9/3.10 cannot parse the PEP 695 `type` statements in the numpy stubs.
+- `examples/03_interface_energy.py` defaults to `--min-thickness 14.4`
+  (8 Cu / 10 Ni layers), the plateau point of the thickness scan in
+  `docs/validation_cu_ni_001.md`. The previous 6.0 A default cut only 4 Ni
+  layers and reported gamma_Ni = 1.979 J/m^2 and gamma_int = 0.041 J/m^2
+  against converged values of 1.9189 and 0.0590 -- 3 % and 30 % off, so the
+  demo contradicted its own validation note out of the box.
 
 ### Fixed
 - `make_supercell` was mutating the source slab (newer pymatgen defaults to

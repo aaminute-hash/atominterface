@@ -110,7 +110,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda"), help="compute device.")
     parser.add_argument(
-        "--min-thickness", type=float, default=6.0, help="minimum slab thickness in A."
+        "--min-thickness",
+        type=float,
+        default=14.4,
+        help=(
+            "minimum slab thickness in A. 14.4 A cuts 8 Cu / 10 Ni layers, "
+            "the plateau point of the thickness scan in "
+            "docs/validation_cu_ni_001.md; the previous 6.0 A default cut "
+            "only 4 Ni layers and reported gamma_Ni = 1.979 J/m^2 and "
+            "gamma_int = 0.041 J/m^2 against converged values of 1.9189 and "
+            "0.0590 -- 3%% and 30%% off, respectively."
+        ),
     )
     parser.add_argument("--vacuum", type=float, default=15.0, help="vacuum padding in A.")
     parser.add_argument("--max-candidates", type=int, default=1, help="keep at most N candidates.")
