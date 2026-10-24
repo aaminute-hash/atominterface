@@ -31,7 +31,12 @@ def _dummy_calc(atoms, state: _DummyState | None = None):  # noqa: D401
             self._atoms = atoms_ref
             self._state = state_ref
 
-        def get_potential_energy(self, atoms):  # noqa: A003
+        def get_potential_energy(self, atoms, force_consistent=False):  # noqa: A003
+            # ASE 3.29's Optimizer probes
+            # atoms.get_potential_energy(force_consistent=True) and
+            # forwards the kwarg here; rejecting it made every relaxation
+            # die in the optimizer constructor.  The dummy backend has a
+            # single energy surface, so the kwarg is accepted and ignored.
             n = len(atoms)
             return float(st.energy if n == 0 else st.energy + 0.001 * n)
 
