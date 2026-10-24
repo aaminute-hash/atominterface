@@ -78,10 +78,13 @@ from atominterface.thermo import interface_energy, fit_cohesive_zone
 
 cfg = BuilderConfig(max_strain=0.05, gap=2.0)
 builder = CoherentInterfaceBuilder(
-    substrate="Li.cif", film="LiH.cif",
-    substrate_miller=(0, 0, 1), film_miller=(0, 0, 1), config=cfg,
+    substrate="Li.cif",
+    film="LiH.cif",
+    substrate_miller=(0, 0, 1),
+    film_miller=(0, 0, 1),
+    config=cfg,
 )
-candidates = builder.build()          # list[Candidate]
+candidates = builder.build()  # list[Candidate]
 
 calc = get_calculator("dummy")
 relaxer = GuardedRelaxer(calculator=calc, ood_threshold=0.8)
