@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Callable
 import numpy as np
 
 from .quarantine import QuarantineRecord, cut_cluster, write_dft_input
-from .watchers import ForceNormWatcher, NeighborWatcher, WatchResult
+from .watchers import CommitteeWatcher, ForceNormWatcher, NeighborWatcher, WatchResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -49,6 +49,7 @@ class GuardedRelaxer:
         max_steps: int = 500,
         ood_threshold: float = 0.8,
         watchers: Sequence[Callable] | None = None,
+        committee_calculators: Sequence | None = None,
         quarantine_dir: str | Path = "./flagged",
         dft_fmt: str = "vasp",
         stop_on: str = "any",
@@ -58,17 +59,47 @@ class GuardedRelaxer:
         self.fmax = fmax
         self.max_steps = max_steps
         self.ood_threshold = ood_threshold
-        self.watchers: list[Callable[..., WatchResult]] = (
-            list(watchers)
-            if watchers is not None
-            else [
+        # Extra calculators whose forces form the disagreement
+        # committee.  Only the default chain gains a CommitteeWatcher;
+        # an explicitly passed ``watchers`` chain is respected verbatim
+        # (the caller owns the chain, we never append to it).
+        self.committee_calculators = list(committee_calculators) if committee_calculators else []
+        if watchers is not None:
+            self.watchers: list[Callable[..., WatchResult]] = list(watchers)
+        else:
+            chain: list[Callable[..., WatchResult]] = [
                 NeighborWatcher(),
                 ForceNormWatcher(),
             ]
-        )
+            if self.committee_calculators:
+                # Multi-model force disagreement: the only watcher here
+                # that is a distributional signal rather than a
+                # geometry/magnitude heuristic.
+                chain.append(CommitteeWatcher(self.committee_calculators))
+            self.watchers = chain
         self.quarantine_dir = Path(quarantine_dir)
         self.dft_fmt = dft_fmt
         self.stop_on = stop_on
+
+    @classmethod
+    def from_calculators(cls, calculators: Sequence, *, primary: int = 0, **kw):
+        """Build a relaxer whose committee is every calculator but one.
+
+        ``calculators[primary]`` drives the relaxation; the remaining
+        calculators are wired as ``committee_calculators`` so the
+        default chain gains a :class:`CommitteeWatcher`.  Passing
+        ``watchers`` explicitly still overrides the whole chain, in
+        which case the committee is not mounted.
+        """
+        calcs = list(calculators)
+        if not calcs:
+            raise ValueError("from_calculators needs at least one calculator")
+        if not 0 <= primary < len(calcs):
+            raise ValueError(f"primary index {primary} out of range for {len(calcs)} calculators")
+        main = calcs[primary]
+        committee = [calc for idx, calc in enumerate(calcs) if idx != primary]
+        kw.setdefault("committee_calculators", committee)
+        return cls(main, **kw)
 
     # ------------------------------------------------------------------
     # Public API
