@@ -95,6 +95,7 @@ addopts = "--tb=short -v"
 markers = [
     "slow: long-running tests",
     "needs_pymatgen: requires pymatgen",
+    "needs_mace: requires mace-torch (MACE-MP-0 medium weights)",
     "needs_gpu: requires a CUDA-capable device",
 ]
 filterwarnings = [
