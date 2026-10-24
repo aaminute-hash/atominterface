@@ -111,6 +111,14 @@ class GuardedRelaxer:
 
         try:
             opt = self._make_optimizer(atoms)
+            # ``max_steps`` is a *total* optimizer-step budget shared by
+            # every guard iteration, not a per-iteration cap.  ASE's
+            # ``opt.run()`` stops only on convergence and defaults to a
+            # 1e8-step budget, so a calculator whose residual force
+            # plateaus above ``fmax`` used to spin inside one call
+            # forever -- which is what the dummy backend did once the
+            # demo tolerance dropped to 0.01 eV/A below its force floor.
+            budget = self.max_steps
             for step in range(self.max_steps):
                 result.n_steps = step + 1
                 forces = atoms.get_forces()
@@ -133,9 +141,24 @@ class GuardedRelaxer:
                     )
                     result.quarantine_path = rec.dft_input_path
                     break
-                opt.run(fmax=self.fmax)
+                done_before = opt.get_number_of_steps()
+                opt.run(fmax=self.fmax, steps=budget)
+                # ASE accumulates its own budget across run() calls
+                # (self.max_steps = self.nsteps + steps), so the delta is
+                # exactly what this call spent.
+                budget -= opt.get_number_of_steps() - done_before
                 if opt.converged():
                     result.converged = True
+                    break
+                if budget <= 0:
+                    # A silent converged=False is a black box for
+                    # provenance, and the Cu/Ni note measured a residual
+                    # force of 0.0099 eV/A against a shipped 0.01
+                    # tolerance -- close enough to exhaust the budget on
+                    # a real backend, which must not pass unnoticed.
+                    result.reasons.append(
+                        f"step_budget_exhausted after {self.max_steps} optimizer steps"
+                    )
                     break
         except Exception as exc:  # noqa: BLE001
             result.reasons.append(f"relax_exception={exc!r}")

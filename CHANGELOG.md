@@ -21,8 +21,9 @@
   guarded relaxation, termination energies, gamma_int.
 - `candidates.csv` now reports both gamma unit conventions (eV/A^2 and
   J/m^2) and the OOD trace (`ood_score`, `ood_step`, `ood_triggered`).
-- `CommitteeWatcher` is mounted in `GuardedRelaxer`'s default watcher
-  chain whenever `committee_calculators` is passed.
+- `CommitteeWatcher` is now wired into the default watcher chain of
+  `GuardedRelaxer` whenever `committee_calculators` is passed -- it was
+  listed under 0.1.0 but was not enabled by default until now.
 - `atominterface.io.canonicalize_arrays()`: sorts `atoms.arrays` keys so
   extxyz column order (and file bytes) no longer drift with
   `PYTHONHASHSEED`.
@@ -96,6 +97,16 @@
 - The dummy backend rejected ASE 3.29's `force_consistent=True` kwarg.
 - `provenance` could emit a non-plain `str` for the torch version, which
   PyYAML refused to represent.
+- **`GuardedRelaxer` could relax forever.** `max_steps` only bounded the
+  guard loop, while `opt.run()` was called without `steps` and so ran on
+  ASE's 100,000,000-step default: any calculator whose residual force
+  plateaus above `fmax` never returned. The dummy backend reached it as
+  soon as the demo tolerance dropped to 0.01 eV/A (its force floor is
+  ~0.018), and a real backend is not safe either -- the Cu/Ni note
+  measures a MACE residual of 0.0099 eV/A against that same 0.01 eV/A
+  target. The budget now caps the *total* optimizer steps across guard
+  iterations, and an exhausted budget is reported as a
+  `step_budget_exhausted` reason rather than a silent `converged=False`.
 
 ## [0.1.0] - 2026-10-17
 
