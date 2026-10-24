@@ -23,11 +23,8 @@ def _fcc(species: str, a: float):
     except ImportError:
         pytest.skip("pymatgen not installed")
 
-    return Structure(
-        Lattice.cubic(a),
-        [species] * 4,
-        [[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]],
-    )
+    coords: list[list[float]] = [[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]]
+    return Structure(Lattice.cubic(a), [species] * 4, coords)
 
 
 @pytest.fixture
@@ -80,7 +77,7 @@ def _layer_count(atoms) -> int:
 
 def _frac_delta(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     """Fractional-coordinate distance modulo one lattice vector."""
-    return np.abs(((left - right + 0.5) % 1.0) - 0.5)
+    return np.asarray(np.abs(((left - right + 0.5) % 1.0) - 0.5))
 
 
 def test_reference_slabs_without_match_are_plain_terminations(cu_bulk, ni_bulk):

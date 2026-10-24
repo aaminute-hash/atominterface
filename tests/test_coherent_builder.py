@@ -513,11 +513,8 @@ def _fcc(species: str, a: float):
     except ImportError:
         pytest.skip("pymatgen not installed")
 
-    return Structure(
-        Lattice.cubic(a),
-        [species] * 4,
-        [[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]],
-    )
+    coords: list[list[float]] = [[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]]
+    return Structure(Lattice.cubic(a), [species] * 4, coords)
 
 
 def test_scale_in_plane_does_not_mutate_the_source_slab():

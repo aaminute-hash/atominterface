@@ -59,9 +59,9 @@ def _read_metadata(path: Path) -> dict:
     try:
         import yaml  # type: ignore[import-untyped]
 
-        return yaml.safe_load(text)
+        return dict(yaml.safe_load(text))
     except Exception:  # noqa: BLE001
-        return json.loads(text)
+        return dict(json.loads(text))
 
 
 @pytest.mark.skipif(not SUBSTRATE.exists(), reason="example data missing")
