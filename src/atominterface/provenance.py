@@ -90,7 +90,14 @@ def build_meta(
     artifacts: dict[str, str] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> RunMeta:
-    """Construct a RunMeta with environment auto-collection."""
+    """Construct a RunMeta with environment auto-collection.
+
+    ``model_hash`` convention: pass the short (12 hex chars) SHA-256 of
+    the weights the backend actually used. Obtain it with
+    ``atominterface.backends.resolve_model_meta(backend, **backend_kwargs)``
+    and read the ``model_hash`` key; backends without verifiable weights
+    (e.g. ``dummy``) leave it empty.
+    """
     import uuid
 
     from atominterface import __version__
