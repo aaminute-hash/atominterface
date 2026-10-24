@@ -38,9 +38,16 @@ def interface_energy(
     area: float,
     unit: str = "eV_A2",
 ) -> float:
-    """Interface formation energy per unit area.
+    """Interface energy per unit area.
 
-    gamma = (E_interface - E_substrate - E_film) / A
+    ``gamma = (E_interface - E_substrate - E_film) / A``
+
+    The ``*_per_area`` parameter names are historical: every energy
+    argument is a **total** energy (eV) of the whole system, and ``A``
+    is the interface area (A^2) that total is divided by.  When the two
+    surface energies are known, :func:`interface_formation_energy` is
+    the physically referenced form: it charges the joint for the
+    surfaces that were destroyed to make it.
     """
     if area <= 0:
         raise ValueError("interface area must be positive")
