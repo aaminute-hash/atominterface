@@ -30,6 +30,7 @@ import atominterface.builders  # noqa: F401  (import side effect: registers buil
 from atominterface.backends.registry import backend_registry
 from atominterface.builders.candidates import charge_summary
 from atominterface.builders.registry import builder_registry
+from atominterface.io import canonicalize_arrays
 
 app = typer.Typer(
     help="Build interface candidates from two bulk structures.",
@@ -385,7 +386,12 @@ def _write_outputs(
 
     outdir.mkdir(parents=True, exist_ok=True)
     for rank, candidate in enumerate(candidates, start=1):
-        ase_write(outdir / f"candidate_{rank:02d}.{fmt}", candidate.to_atoms())
+        atoms = candidate.to_atoms()
+        # pymatgen site properties reach atoms.arrays in set-iteration
+        # order, so the extxyz column order (and with it the file bytes)
+        # would drift with PYTHONHASHSEED without this normalisation.
+        canonicalize_arrays(atoms)
+        ase_write(outdir / f"candidate_{rank:02d}.{fmt}", atoms)
     csv_path = outdir / "candidates.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(

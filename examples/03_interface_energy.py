@@ -20,8 +20,12 @@ Outputs (in --outdir, default outputs/energy_cu_ni):
 
 The dummy backend runs the whole chain as a wiring self-test, but its
 energies carry no physical meaning; --backend mace (the default) is the
-real driver.  The seed is fixed (SEED below) so a rerun reproduces the
-same ledger bit for bit.
+real driver.  The seed is fixed (SEED below): the CSV ledger
+reproduces to its written precision and the extxyz column order is
+canonicalised, so the file layout never drifts with PYTHONHASHSEED.  A
+residual ~1e-7 cross-process noise (torch CPU thread-reduction order,
+machine-load dependent) can flip the last written decimal; reruns in
+the same process are bit-identical.
 
 Run:
     python examples/03_interface_energy.py --backend dummy
@@ -291,6 +295,19 @@ def _identity(args: argparse.Namespace) -> tuple[str, str]:
     return identity, backend_version
 
 
+def _write(path: Path, atoms) -> None:
+    """Write one extxyz with canonical array order (byte-stable layout).
+
+    pymatgen site properties reach ``atoms.arrays`` in set-iteration
+    order; without the normalisation the extxyz column order -- and
+    with it the file bytes -- would drift between processes.
+    """
+    from atominterface.io import canonicalize_arrays
+
+    canonicalize_arrays(atoms)
+    ase_write(path, atoms)
+
+
 def _jsonable(value):
     """argparse values -> YAML/JSON-safe primitives (Path -> str)."""
     if isinstance(value, Path):
@@ -329,11 +346,11 @@ def _write_outputs(
         writer.writeheader()
         writer.writerows([row])
 
-    ase_write(outdir / "interface_relaxed.extxyz", relax_interface.atoms)
-    ase_write(outdir / "slab_sub_relaxed.extxyz", relax_sub.atoms)
-    ase_write(outdir / "slab_film_relaxed.extxyz", relax_film.atoms)
-    ase_write(outdir / "bulk_sub.extxyz", bulk_sub_measured)
-    ase_write(outdir / "bulk_film.extxyz", bulk_film_measured)
+    _write(outdir / "interface_relaxed.extxyz", relax_interface.atoms)
+    _write(outdir / "slab_sub_relaxed.extxyz", relax_sub.atoms)
+    _write(outdir / "slab_film_relaxed.extxyz", relax_film.atoms)
+    _write(outdir / "bulk_sub.extxyz", bulk_sub_measured)
+    _write(outdir / "bulk_film.extxyz", bulk_film_measured)
 
     meta = build_meta(
         backend=args.backend,
