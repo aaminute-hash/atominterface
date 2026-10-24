@@ -6,7 +6,11 @@ one calculator setting (same backend, same device) for every term:
 
   1. load the two bulks (examples/data/Cu_fcc.vasp, Ni_fcc.vasp)
   2. coherent candidates via CoherentInterfaceBuilder (1x1 cell by default)
-  3. bulk single points (per-atom and total)
+  3. bulk single points: the pristine cells, plus the *coherent*
+     reference (in-plane strained like the slabs, out-of-plane relaxed)
+     that the termination energies must use -- a strained slab measured
+     against a pristine bulk leaves n * dE_strain in gamma, which drifts
+     with layer count instead of converging
   4. reference slabs -- same supercell, strain and termination as the
      interface, via reference_slabs()
   5. guarded relaxation of both reference slabs and the interface
@@ -77,6 +81,8 @@ CSV_FIELDS = [
     "n_atoms",
     "E_bulk_sub_ev_per_atom",
     "E_bulk_film_ev_per_atom",
+    "E_bulk_sub_coh_ev_per_atom",
+    "E_bulk_film_coh_ev_per_atom",
     "E_slab_sub_ev",
     "E_slab_film_ev",
     "E_interface_ev",
@@ -108,7 +114,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--vacuum", type=float, default=15.0, help="vacuum padding in A.")
     parser.add_argument("--max-candidates", type=int, default=1, help="keep at most N candidates.")
-    parser.add_argument("--fmax", type=float, default=0.05, help="force tolerance in eV/A.")
+    parser.add_argument(
+        "--fmax",
+        type=float,
+        default=0.01,
+        help=(
+            "force tolerance in eV/A. The 0.05 eV/A convention is too loose "
+            "here: the force driving a Cu slab's out-of-plane expansion is "
+            "itself ~0.05 eV/A, so the interior never reaches the bulk "
+            "spacing the termination energy references and gamma drifts with "
+            "layer count (see docs/validation_cu_ni_001.md)."
+        ),
+    )
     parser.add_argument(
         "--max-steps", type=int, default=200, help="relaxation step cap per structure."
     )
@@ -157,6 +174,70 @@ def _single_point(atoms, calculator) -> tuple[float, object]:
     measured = atoms.copy()
     measured.calc = calculator(measured)
     return float(measured.get_potential_energy()), measured
+
+
+def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
+    """Total energy of the bulk under the slab's in-plane strain.
+
+    Both reference slabs share the interface's in-plane lattice, so the
+    film side carries the mismatch strain (2.6% for Cu/Ni) while the
+    substrate side does not.  Referencing a strained slab against the
+    *pristine* bulk leaves ``n * dE_strain`` inside the termination
+    energy -- a term that grows with layer count, which is why gamma_Ni
+    used to drift instead of converging.  The coherent bulk (in-plane
+    locked to the slab strain, out-of-plane relaxed through the
+    Poisson response) is the reference that removes it.
+
+    The out-of-plane strain is found by a parabola fitted to the three
+    samples bracketing the discrete grid minimum, not by a fit over the
+    whole grid: over a 10% window E(sz) is strongly anharmonic, and a
+    wide least-squares parabola dips below the true curve (it reported
+    +0.57 meV/atom of relaxation gain for Cu where a dense scan finds
+    +0.35).  The local fit reproduces the dense-scan minimum to within
+    0.01 meV/atom on both Cu and Ni.
+
+    Args:
+        atoms: Pristine bulk cell (ASE).
+        strain: Isotropic in-plane strain carried by the slab
+            (``candidate.strain_substrate`` / ``candidate.strain_film``).
+            A general (anisotropic or sheared) match would need the full
+            deformation tensor here; the (001) fcc demo is isotropic.
+        calculator: Calculator factory shared by the ledger.
+
+    Returns:
+        Total energy of the strained bulk cell, in eV.
+    """
+    import numpy as np
+
+    base_cell = np.array(atoms.get_cell(), dtype=float)
+    grid = np.linspace(-0.08, 0.02, 9)
+    energies = []
+    for sz in grid:
+        strained = atoms.copy()
+        # Cartesian-component scaling: the pristine fcc cell is cubic with
+        # the slab normal along z, so this is exactly (e, e, sz).
+        strained.set_cell(
+            base_cell * np.array([1.0 + strain, 1.0 + strain, 1.0 + float(sz)]),
+            scale_atoms=True,
+        )
+        strained.calc = calculator(strained)
+        energies.append(float(strained.get_potential_energy()))
+    profile = np.asarray(energies, dtype=float)
+    index = int(np.argmin(profile))
+    if index in (0, len(grid) - 1):
+        # Monotonic across the sampled window: the minimum lies outside
+        # it, and extrapolating is worse than taking the best sample.
+        return float(profile[index])
+    lower, centre, upper = (float(profile[index + offset]) for offset in (-1, 0, 1))
+    curvature = lower - 2.0 * centre + upper
+    if abs(curvature) < 1e-12:
+        # Flat profile (a calculator whose energy does not depend on the
+        # cell, e.g. the dummy wiring self-test, or a strain-free side):
+        # there is no out-of-plane minimum to fit, so every grid point is
+        # the answer.  Fitting a parabola through a constant would divide
+        # by zero curvature.
+        return float(profile[index])
+    return float(centre - (lower - upper) ** 2 / (8.0 * curvature))
 
 
 def _build_candidate(substrate, film, args: argparse.Namespace):
@@ -394,10 +475,15 @@ def main(argv: list[str] | None = None) -> int:
     calculator = _make_calculator(args.backend, args.device)
     print(f"backend  : {args.backend} (device {args.device})")
 
-    # Bulk single points: per-atom values are recorded, totals feed the
-    # termination energies.
+    # Bulk single points: the pristine values are recorded per atom, the
+    # coherent ones (carrying the slab's in-plane strain) feed the
+    # termination energies -- see _coherent_bulk_energy.
     e_bulk_sub, bulk_sub_measured = _single_point(substrate_atoms, calculator)
     e_bulk_film, bulk_film_measured = _single_point(film_atoms, calculator)
+    e_bulk_sub_coh = _coherent_bulk_energy(
+        substrate_atoms, float(candidate.strain_substrate), calculator
+    )
+    e_bulk_film_coh = _coherent_bulk_energy(film_atoms, float(candidate.strain_film), calculator)
 
     # Reference slabs: same supercell, same strain, same termination as
     # the interface side they reference.
@@ -413,8 +499,8 @@ def main(argv: list[str] | None = None) -> int:
         film_atoms=film_atoms,
         reference_sub=reference_sub,
         reference_film=reference_film,
-        e_bulk_sub=e_bulk_sub,
-        e_bulk_film=e_bulk_film,
+        e_bulk_sub=e_bulk_sub_coh,
+        e_bulk_film=e_bulk_film_coh,
         energies=energies,
     )
     identity, backend_version = _identity(args)
@@ -430,6 +516,8 @@ def main(argv: list[str] | None = None) -> int:
         "n_atoms": candidate.total_atoms,
         "E_bulk_sub_ev_per_atom": f"{e_bulk_sub / len(substrate_atoms):.6f}",
         "E_bulk_film_ev_per_atom": f"{e_bulk_film / len(film_atoms):.6f}",
+        "E_bulk_sub_coh_ev_per_atom": f"{e_bulk_sub_coh / len(substrate_atoms):.6f}",
+        "E_bulk_film_coh_ev_per_atom": f"{e_bulk_film_coh / len(film_atoms):.6f}",
         "E_slab_sub_ev": f"{e_slab_sub:.6f}",
         "E_slab_film_ev": f"{e_slab_film:.6f}",
         "E_interface_ev": f"{e_interface:.6f}",
@@ -462,8 +550,14 @@ def main(argv: list[str] | None = None) -> int:
         f"{e_bulk_sub / len(substrate_atoms):8.4f} eV/atom"
     )
     print(
-        f"E_bulk film (Ni): {e_bulk_film:10.4f} eV total | "
-        f"{e_bulk_film / len(film_atoms):8.4f} eV/atom"
+        f"strain in-plane : sub {float(candidate.strain_substrate):+.4%} | "
+        f"film {float(candidate.strain_film):+.4%}"
+    )
+    print(
+        f"E_bulk coherent : sub {e_bulk_sub_coh / len(substrate_atoms):8.4f} eV/atom "
+        f"({(e_bulk_sub_coh - e_bulk_sub) / len(substrate_atoms):+.5f} vs pristine) | "
+        f"film {e_bulk_film_coh / len(film_atoms):8.4f} eV/atom "
+        f"({(e_bulk_film_coh - e_bulk_film) / len(film_atoms):+.5f} vs pristine)"
     )
     # GuardedRelaxer.n_steps counts guard watch cycles, not optimizer
     # steps (one opt.run() call relaxes to fmax, so a converged relax
