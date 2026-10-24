@@ -2,6 +2,7 @@
 
 from atominterface.provenance import (
     RunMeta,
+    _collect_env,
     build_meta,
     hash_bytes,
     write_metadata,
@@ -37,3 +38,17 @@ def test_write_metadata_json_when_yaml_missing(tmp_path, monkeypatch):
     p = write_metadata(m, tmp_path / "run_meta")
     assert p.suffix == ".json"
     assert p.exists()
+
+
+def test_collect_env_values_are_plain_str():
+    """Every env version must be exactly ``str``, not a str subclass.
+
+    torch exposes ``__version__`` as ``TorchVersion`` (a str subclass);
+    ``yaml.safe_dump`` looks representers up by exact type and refuses
+    the subclass, which silently downgraded ``metadata.yaml`` to the
+    JSON fallback whenever torch was importable.
+    """
+    env = _collect_env()
+    assert env  # python/platform are always collected
+    for key, value in env.items():
+        assert type(value) is str, f"{key} is {type(value).__name__}"

@@ -49,7 +49,11 @@ def _collect_env() -> dict[str, str]:
     for mod in ("ase", "pymatgen", "torch"):
         try:
             m = __import__(mod)
-            env[mod] = getattr(m, "__version__", "unknown")
+            # str(...) is load-bearing: torch exposes __version__ as a
+            # str subclass (TorchVersion), which yaml.safe_dump refuses
+            # to represent and which would silently downgrade the whole
+            # metadata file to the JSON fallback.
+            env[mod] = str(getattr(m, "__version__", "unknown"))
         except Exception:  # noqa: BLE001
             env[mod] = "not-installed"
     return env
