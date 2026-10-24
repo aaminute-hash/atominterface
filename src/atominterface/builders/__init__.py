@@ -14,7 +14,11 @@ from atominterface.builders.base import (
     InterfaceBuilder,
 )
 from atominterface.builders.charge import analyze_charge_polarity
-from atominterface.builders.coherent import CoherentInterfaceBuilder, CoherentInterfaceConfig
+from atominterface.builders.coherent import (
+    CoherentInterfaceBuilder,
+    CoherentInterfaceConfig,
+    reference_slabs,
+)
 from atominterface.builders.registry import (
     BuilderRegistry,
     autodiscover,
@@ -37,5 +41,6 @@ __all__ = [
     "BuilderRegistry",
     "builder_registry",
     "get_builder",
+    "reference_slabs",
     "register_builder",
 ]
