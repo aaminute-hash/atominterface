@@ -50,6 +50,7 @@ from atominterface.physics import EV_A2_TO_J_M2
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Any
 
 # Pymatgen is an optional dependency.  These are bound here at module
 # level (rather than inside the functions that use them) so that tests
@@ -67,6 +68,7 @@ except ImportError:  # pragma: no cover - optional dependency
 __all__ = [
     "CoherentInterfaceConfig",
     "CoherentInterfaceBuilder",
+    "reference_slabs",
 ]
 
 # Strains within 1e-4 (0.01 %) of each other are treated as equally good
@@ -615,6 +617,54 @@ def _scale_in_plane(structure, transform):
     return slab
 
 
+def _strain_film_onto(film_slab, substrate_slab_2d):
+    """Strain ``film_slab`` in-plane onto the substrate cell.
+
+    Returns a new ``Structure`` whose in-plane lattice *is*
+    ``substrate_slab_2d`` and whose cartesian coordinates carry the
+    matching deformation ``sub_2d @ inv(film_2d)`` applied to the
+    in-plane components (``coords @ deformation.T``).  Because the same
+    map acts on the coordinates and on the cell, the fractional
+    coordinates -- the stacking sequence -- are preserved.
+
+    Shared by :func:`_assemble_interface` and :func:`reference_slabs`
+    so an interface and the reference boards it is referenced against
+    are strained by one implementation, not two approximations.  The
+    slab's vacuum column along z is carried over untouched and the
+    input is never modified.
+    """
+    from pymatgen.core import Structure
+    from pymatgen.core.lattice import Lattice as _Lattice
+
+    film_mat = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
+    film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
+    sub_2d = np.asarray(substrate_slab_2d, dtype=np.float64)
+
+    deformation = sub_2d @ np.linalg.inv(film_2d)
+    coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
+    coords[:, :2] = coords[:, :2] @ deformation.T
+
+    # Clean z axis, mirroring the cell ``_assemble_interface`` builds:
+    # the in-plane rows carry no z component and the film keeps its own
+    # vacuum column, so a strained reference board stays centred.
+    rows = np.zeros((3, 3), dtype=np.float64)
+    rows[0, :2] = sub_2d[0]
+    rows[1, :2] = sub_2d[1]
+    rows[2, 2] = film_mat[2, 2] if film_mat[2, 2] > 0 else 1.0
+
+    site_properties = {key: list(values) for key, values in film_slab.site_properties.items()}
+    strained = Structure(
+        _Lattice(rows),
+        list(film_slab.species),
+        coords,
+        coords_are_cartesian=True,
+        to_unit_cell=False,
+        site_properties=site_properties or None,
+    )
+    strained.properties.update(film_slab.properties)
+    return strained
+
+
 def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
     """Stack substrate and film slabs into one coherent interface.
 
@@ -666,20 +716,20 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
     film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
 
     sub_coords = np.asarray(substrate_slab.cart_coords, dtype=np.float64).copy()
-    film_coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
 
-    # Strain the film onto the substrate cell.  Applying the same 2x2
-    # map to the cartesian coordinates and to the lattice keeps the
-    # fractional coordinates -- i.e. the stacking sequence -- intact.
+    # Strain the film onto the substrate cell.  The shared helper keeps
+    # the fractional coordinates -- i.e. the stacking sequence -- intact
+    # and is the very same call ``reference_slabs`` performs, so a
+    # reference board and the interface side it references are strained
+    # by literally the same code.
     coherent = (
         match is not None
         and abs(float(np.linalg.det(sub_2d))) > 1e-9
         and abs(float(np.linalg.det(film_2d))) > 1e-9
     )
     if coherent:
-        deformation = sub_2d @ np.linalg.inv(film_2d)
-        film_coords[:, :2] = film_coords[:, :2] @ deformation.T
-        film_2d = sub_2d.copy()
+        film_slab = _strain_film_onto(film_slab, sub_2d)
+    film_coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
 
     # Rebuild both cells with a clean z axis so the vacuum budget is exact.
     def _cell(in_plane, c):
@@ -916,6 +966,74 @@ def _to_candidate(
         n_film=n_film,
         metadata=metadata,
     )
+
+
+def _select_termination(terms, index: int, side: str):
+    """Pick one termination by index from a :func:`_make_slabs` result."""
+    for idx, slab in terms:
+        if idx == index:
+            return slab
+    available = ", ".join(str(idx) for idx, _ in terms) or "none"
+    raise ValueError(f"{side} termination {index} not found; available indices: {available}")
+
+
+def reference_slabs(
+    substrate,
+    film,
+    config: CoherentInterfaceConfig,
+    match: _MatchInfo | None = None,
+    *,
+    substrate_termination: int = 0,
+    film_termination: int = 0,
+) -> tuple[Any, Any]:
+    """Isolated reference slabs for the two sides of a coherent interface.
+
+    An interface energy is only meaningful against the boards the
+    interface was built from: same supercell, same thickness, same
+    termination.  This returns ``(substrate_reference,
+    film_reference)`` as ASE ``Atoms``, cut through the very same
+    :func:`_make_slabs` / :func:`_get_terminations` path the builder
+    uses, so each board differs from its interface side only by the
+    rigid stacking transform:
+
+    * the substrate board is replicated by ``match.substrate_supercell``
+      and **never** strained -- its cell is the reference the film is
+      deformed onto;
+    * the film board is replicated by ``match.film_supercell`` and then
+      strained by the same :func:`_strain_film_onto` call
+      :func:`_assemble_interface` performs, so its in-plane cell equals
+      the substrate cell exactly;
+    * with ``match=None`` both boards are the plain 1x1 terminations
+      (legacy stacking, no strain), mirroring ``_assemble_interface``'s
+      "Without match the slabs are stacked as given".
+
+    ``substrate_termination`` / ``film_termination`` select the cut by
+    index; an unavailable index raises :class:`ValueError` naming the
+    available ones.  ``symmetric_slabs=True`` routes through
+    :func:`_symmetric_terminations` exactly like :func:`_make_slabs`,
+    so a forced mirror board references itself.  ``SlabGenerator``
+    hands back centred boards and neither replicating nor straining
+    moves atoms along z, so both references stay centred in their
+    vacuum.
+    """
+    sub_bulk = _prepare_charge_structure(
+        substrate, config.substrate_charges, config.substrate_oxidation
+    )
+    film_bulk = _prepare_charge_structure(film, config.film_charges, config.film_oxidation)
+    sub_terms, film_terms = _make_slabs(sub_bulk, film_bulk, config)
+
+    sub_slab = _select_termination(sub_terms, substrate_termination, "substrate")
+    film_slab = _select_termination(film_terms, film_termination, "film")
+
+    if match is not None:
+        sub_slab = _scale_in_plane(sub_slab, match.substrate_supercell)
+        film_slab = _scale_in_plane(film_slab, match.film_supercell)
+        sub_2d = np.asarray(sub_slab.lattice.matrix, dtype=np.float64)[:2, :2]
+        film_2d = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
+        if abs(float(np.linalg.det(sub_2d))) > 1e-9 and abs(float(np.linalg.det(film_2d))) > 1e-9:
+            film_slab = _strain_film_onto(film_slab, sub_2d)
+
+    return _to_ase(sub_slab), _to_ase(film_slab)
 
 
 @register_builder("coherent")

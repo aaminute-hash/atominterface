@@ -70,7 +70,20 @@ class CommitteeWatcher:
     In production this is populated by the guard with per-model forces;
     here we expose the aggregation math so it can be tested without
     loading real models.
+
+    Instantiated with a list of *additional* ASE calculators, the
+    watcher evaluates every member alongside the primary forces the
+    guard already computed and scores the spread between them.  A
+    member that fails (non-standard interface, broken model) is
+    skipped: the guard must never crash inside its own monitoring.
     """
+
+    def __init__(self, calculators: Sequence | None = None, *, scale: float = 1.0) -> None:
+        self.calculators = list(calculators) if calculators else []
+        # Sensitivity knob kept for callers/tuning; deliberately NOT
+        # applied to the aggregation below so ``from_force_arrays``
+        # keeps its documented ``min(1, mean disagreement)`` semantics.
+        self.scale = float(scale)
 
     @staticmethod
     def from_force_arrays(force_arrays: Sequence[np.ndarray]) -> WatchResult:
@@ -82,3 +95,48 @@ class CommitteeWatcher:
         return WatchResult(
             score=score, reason="committee_disagreement", meta={"disagreement": per_atom}
         )
+
+    @staticmethod
+    def _committee_forces(calc, atoms):
+        """Forces of one committee member, or ``None`` if it fails.
+
+        Standard ASE calculators answer ``calc.get_forces(atoms)``.
+        Objects with a non-standard signature (our dummy factories,
+        mocks) raise ``TypeError``/``AttributeError`` there; those get
+        the classic fallback of attaching the calculator to a copy of
+        the atoms and letting ASE drive it.  Any failure -- in either
+        path -- returns ``None`` so the member is skipped instead of
+        propagating into the guard loop.
+        """
+        try:
+            return calc.get_forces(atoms)
+        except (TypeError, AttributeError):
+            pass
+        except Exception:  # noqa: BLE001 - a broken member must not kill the guard
+            return None
+        try:
+            probe = atoms.copy()
+            probe.calc = calc
+            return probe.get_forces()
+        except Exception:  # noqa: BLE001 - same: skip, never crash
+            return None
+
+    def __call__(self, atoms, forces: np.ndarray) -> WatchResult:  # noqa: D401
+        if not self.calculators:
+            # Not enabled: a single array has no disagreement by
+            # definition, matching the static method's <2 guard.
+            return self.from_force_arrays([forces])
+        primary = np.asarray(forces, dtype=np.float64)
+        arrays = [primary]
+        for calc in self.calculators:
+            member = self._committee_forces(calc, atoms)
+            if member is None:
+                continue
+            arr = np.asarray(member, dtype=np.float64)
+            if arr.shape != primary.shape:
+                continue  # unusable member (wrong atom count/layout): skip
+            arrays.append(arr)
+        if len(arrays) >= 2:
+            return self.from_force_arrays(arrays)
+        # Every member failed: fall back to the primary forces alone.
+        return self.from_force_arrays([primary])

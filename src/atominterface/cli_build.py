@@ -5,7 +5,10 @@ it loads two bulk structures, picks the requested builder from the registry,
 runs the enumeration and writes the surviving candidates plus CSV/JSON reports.
 
 ``pymatgen`` is only imported when a structure actually has to be read, so
-``atominterface build --help`` keeps working on a slim installation.
+``atominterface build --help`` keeps working on a slim installation.  The
+same laziness applies to calculators: without ``--relax`` no backend is
+imported beyond its (dependency-light) registration module, and no model
+weights are ever loaded.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import csv
 import json
 import math
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -23,8 +27,10 @@ except ImportError:  # pragma: no cover - older typer builds on the real click
     from click.core import ParameterSource  # type: ignore[no-redef]
 
 import atominterface.builders  # noqa: F401  (import side effect: registers built-in builders)
+from atominterface.backends.registry import backend_registry
 from atominterface.builders.candidates import charge_summary
 from atominterface.builders.registry import builder_registry
+from atominterface.io import canonicalize_arrays
 
 app = typer.Typer(
     help="Build interface candidates from two bulk structures.",
@@ -40,6 +46,7 @@ _CHARGE_OPTIONS = (
     "charge_tolerance",
     "dipole_tolerance",
 )
+_DEVICES = ("cpu", "cuda")
 _CSV_FIELDS = (
     "rank",
     "interface_id",
@@ -53,6 +60,9 @@ _CSV_FIELDS = (
     "area",
     "n_atoms",
 )
+#: OOD bookkeeping columns, appended after the charge summary so the
+#: historical column order stays untouched.
+_OOD_FIELDS = ("ood_score", "ood_step")
 
 
 def _load_structure(path: Path):
@@ -80,6 +90,45 @@ def _resolve_builder(name: str):
             f"unknown builder {name!r}; available: {available}",
             param_hint="--builder",
         ) from None
+
+
+def _resolve_backend(name: str) -> str:
+    """Validate a backend name, listing the known names when the lookup fails.
+
+    ``autodiscover`` only imports the optional backend *registration*
+    modules, whose module level is dependency-light; the heavy calculator
+    (torch, model weights) is constructed exclusively by ``--relax``.
+    """
+    from atominterface.backends import autodiscover
+
+    autodiscover()
+    if name not in backend_registry.list():
+        available = ", ".join(sorted(backend_registry.list())) or "<none>"
+        raise typer.BadParameter(
+            f"unknown backend {name!r}; available: {available}",
+            param_hint="--backend",
+        )
+    return name
+
+
+def _validate_device(value: str) -> str:
+    """Accept only cpu/cuda, and verify cuda is usable before promising it."""
+    if value not in _DEVICES:
+        raise typer.BadParameter("must be one of: " + ", ".join(_DEVICES))
+    if value != "cuda":
+        return value
+    try:
+        import torch
+    except ImportError:
+        # Without torch every backend runs on cpu anyway; honour the run
+        # with a note instead of failing a request that cannot be met.
+        typer.echo("note: torch is not installed; running on cpu instead of cuda.")
+        return "cpu"
+    if not torch.cuda.is_available():
+        raise typer.BadParameter(
+            "cuda requested but no CUDA-capable device is available; use --device cpu"
+        )
+    return value
 
 
 def _make_config(builder_name: str, **overrides):
@@ -212,14 +261,93 @@ def _report_no_candidates(instance, max_strain: float, max_area: float) -> None:
     typer.echo(f"Re-run with --max-strain {suggested:g} to keep these candidates.")
 
 
+def _ood_columns(result: Any) -> dict[str, str]:
+    """``ood_score`` / ``ood_step`` cells for one relaxed candidate.
+
+    Without a relaxation there is nothing to report, so both cells stay
+    empty; a relaxed candidate carries its peak OOD score and the step
+    that first crossed the threshold (-1 when it never did).
+    """
+    if result is None:
+        return dict.fromkeys(_OOD_FIELDS, "")
+    return {"ood_score": f"{result.max_ood_score:.6f}", "ood_step": str(result.ood_step)}
+
+
+def _relax_candidates(
+    candidates: list,
+    *,
+    backend: str,
+    device: str,
+    fmax: float,
+    max_steps: int,
+    ood_threshold: float,
+    outdir: Path,
+) -> dict[int, Any]:
+    """Guarded-relax every candidate in place with the selected backend.
+
+    The relaxed structure replaces ``candidate.atoms`` so the written
+    ``candidate_NN`` files (with their calculator results) describe the
+    relaxed geometry, and the OOD bookkeeping is stashed in
+    ``candidate.metadata["relax"]`` for the JSON report.
+
+    Returns:
+        A ``{rank: RelaxResult}`` map keyed like the written candidates.
+    """
+    from atominterface.backends import get_calculator
+    from atominterface.relax import GuardedRelaxer
+
+    typer.echo(
+        f"\nRelaxing {len(candidates)} candidate(s) with backend={backend} device={device} "
+        f"(fmax={fmax:g}, max_steps={max_steps}, ood_threshold={ood_threshold:g})."
+    )
+    relaxer = GuardedRelaxer(
+        calculator=get_calculator(backend, device=device),
+        fmax=fmax,
+        max_steps=max_steps,
+        ood_threshold=ood_threshold,
+        quarantine_dir=str(outdir / "flagged"),
+    )
+    results: dict[int, Any] = {}
+    for rank, candidate in enumerate(candidates, start=1):
+        result = relaxer.run(candidate.atoms)
+        candidate.atoms = result.atoms
+        candidate.metadata["relax"] = {
+            "backend": backend,
+            "device": device,
+            "n_steps": result.n_steps,
+            "converged": result.converged,
+            "ood_triggered": result.ood_triggered,
+            "ood_step": result.ood_step,
+            "max_ood_score": result.max_ood_score,
+            "reasons": result.reasons,
+        }
+        results[rank] = result
+        if result.converged:
+            status = "converged"
+        elif result.ood_triggered:
+            status = "OOD-stopped"
+        else:
+            status = "step limit"
+        typer.echo(
+            f"  candidate {rank:02d}: {status}, cycles={result.n_steps}, "
+            f"max_ood={result.max_ood_score:.4f}, ood_step={result.ood_step}"
+        )
+    return results
+
+
 def _write_outputs(
-    candidates: list, outdir: Path, fmt: str, build_report: dict | None = None
+    candidates: list,
+    outdir: Path,
+    fmt: str,
+    build_report: dict | None = None,
+    relax_results: dict[int, Any] | None = None,
 ) -> Path:
     """Write structures, an extended CSV and strict JSON, even for an empty set.
 
     JSON retains the full charge analysis and geometry snapshot.  It is also
     the authoritative charge record for structure formats without metadata.
-    The optional fourth argument preserves existing three-argument callers.
+    The optional fourth and fifth arguments (build report, relaxation
+    results) preserve existing three-argument callers.
     """
     from ase.io import write as ase_write
 
@@ -240,9 +368,12 @@ def _write_outputs(
             "area": f"{candidate.area:.4f}",
             "n_atoms": candidate.total_atoms,
             **charge_summary(analysis),
+            **_ood_columns(relax_results.get(rank) if relax_results else None),
         }
         rows.append(row)
-        json_rows.append({**row, "charge_analysis": analysis})
+        json_rows.append(
+            {**row, "charge_analysis": analysis, "relax": candidate.metadata.get("relax")}
+        )
 
     # Validate JSON before writing any files: unknowns must be null, never NaN/Inf.
     json_outputs = {
@@ -255,10 +386,17 @@ def _write_outputs(
 
     outdir.mkdir(parents=True, exist_ok=True)
     for rank, candidate in enumerate(candidates, start=1):
-        ase_write(outdir / f"candidate_{rank:02d}.{fmt}", candidate.to_atoms())
+        atoms = candidate.to_atoms()
+        # pymatgen site properties reach atoms.arrays in set-iteration
+        # order, so the extxyz column order (and with it the file bytes)
+        # would drift with PYTHONHASHSEED without this normalisation.
+        canonicalize_arrays(atoms)
+        ase_write(outdir / f"candidate_{rank:02d}.{fmt}", atoms)
     csv_path = outdir / "candidates.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[*_CSV_FIELDS, *charge_summary(None)])
+        writer = csv.DictWriter(
+            handle, fieldnames=[*_CSV_FIELDS, *charge_summary(None), *_OOD_FIELDS]
+        )
         writer.writeheader()
         writer.writerows(rows)
     for name, content in json_outputs.items():
@@ -307,6 +445,37 @@ def build(
     ),
     gap: float = typer.Option(2.0, "--gap", help="Separation gap between slabs in A."),
     max_candidates: int = typer.Option(10, "--max-candidates", help="Keep at most N candidates."),
+    backend: str = typer.Option(
+        "dummy",
+        "--backend",
+        help="Calculator backend for --relax: dummy, mace or chgnet.",
+    ),
+    device: str = typer.Option(
+        "cpu",
+        "--device",
+        callback=_validate_device,
+        help="Compute device for --relax: cpu or cuda.",
+    ),
+    relax: bool = typer.Option(
+        False,
+        "--relax",
+        help="Guarded-relax each candidate with the selected backend.",
+    ),
+    fmax: float = typer.Option(
+        0.05,
+        "--fmax",
+        callback=_finite_nonnegative,
+        help="Relaxation force tolerance in eV/A (with --relax).",
+    ),
+    max_steps: int = typer.Option(
+        200, "--max-steps", help="Maximum relaxation steps per candidate (with --relax)."
+    ),
+    ood_threshold: float = typer.Option(
+        0.8,
+        "--ood-threshold",
+        callback=_finite_nonnegative,
+        help="OOD score that stops a relaxation early (with --relax).",
+    ),
     charge_policy: str = typer.Option(
         "report",
         "--charge-policy",
@@ -349,6 +518,7 @@ def build(
     """Enumerate interface candidates for a substrate/film pair."""
     builder_cls = _resolve_builder(builder)
     _check_charge_support(ctx, builder, symmetric)
+    _resolve_backend(backend)
     config = _make_config(
         builder,
         substrate_miller=tuple(sub_miller),
@@ -376,7 +546,18 @@ def build(
     instance = builder_cls(substrate=sub, film=film_struct, config=config)
     candidates = instance.build()
     report = getattr(instance, "last_build_report", None)
-    csv_path = _write_outputs(candidates, outdir, fmt, report)
+    relax_results = None
+    if relax:
+        relax_results = _relax_candidates(
+            candidates,
+            backend=backend,
+            device=device,
+            fmax=fmax,
+            max_steps=max_steps,
+            ood_threshold=ood_threshold,
+            outdir=outdir,
+        )
+    csv_path = _write_outputs(candidates, outdir, fmt, report, relax_results)
 
     if not candidates:
         _report_no_candidates(instance, max_strain, max_area)

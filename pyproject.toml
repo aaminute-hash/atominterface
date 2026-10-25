@@ -1,6 +1,6 @@
 [project]
 name = "atominterface"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reliable interface modeling for AI4S: coherent interface builder + uMLIP guard layer + thermodynamic profiler."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -95,6 +95,7 @@ addopts = "--tb=short -v"
 markers = [
     "slow: long-running tests",
     "needs_pymatgen: requires pymatgen",
+    "needs_mace: requires mace-torch (MACE-MP-0 medium weights)",
     "needs_gpu: requires a CUDA-capable device",
 ]
 filterwarnings = [

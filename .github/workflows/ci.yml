@@ -26,6 +26,11 @@ jobs:
           pip install -e ".[dev]"
           # pymatgen is optional; install it when available
           pip install pymatgen || echo "pymatgen install skipped"
+          # Real MLIP backends are optional: an install failure must not fail
+          # CI, the corresponding tests skip via pytest.importorskip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu || echo "torch install skipped"
+          pip install mace-torch || echo "mace install skipped"
+          pip install chgnet || echo "chgnet install skipped"
 
       - name: Lint with ruff
         run: ruff check src tests examples

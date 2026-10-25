@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Callable
 import numpy as np
 
 from .quarantine import QuarantineRecord, cut_cluster, write_dft_input
-from .watchers import ForceNormWatcher, NeighborWatcher, WatchResult
+from .watchers import CommitteeWatcher, ForceNormWatcher, NeighborWatcher, WatchResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -49,6 +49,7 @@ class GuardedRelaxer:
         max_steps: int = 500,
         ood_threshold: float = 0.8,
         watchers: Sequence[Callable] | None = None,
+        committee_calculators: Sequence | None = None,
         quarantine_dir: str | Path = "./flagged",
         dft_fmt: str = "vasp",
         stop_on: str = "any",
@@ -58,17 +59,47 @@ class GuardedRelaxer:
         self.fmax = fmax
         self.max_steps = max_steps
         self.ood_threshold = ood_threshold
-        self.watchers: list[Callable[..., WatchResult]] = (
-            list(watchers)
-            if watchers is not None
-            else [
+        # Extra calculators whose forces form the disagreement
+        # committee.  Only the default chain gains a CommitteeWatcher;
+        # an explicitly passed ``watchers`` chain is respected verbatim
+        # (the caller owns the chain, we never append to it).
+        self.committee_calculators = list(committee_calculators) if committee_calculators else []
+        if watchers is not None:
+            self.watchers: list[Callable[..., WatchResult]] = list(watchers)
+        else:
+            chain: list[Callable[..., WatchResult]] = [
                 NeighborWatcher(),
                 ForceNormWatcher(),
             ]
-        )
+            if self.committee_calculators:
+                # Multi-model force disagreement: the only watcher here
+                # that is a distributional signal rather than a
+                # geometry/magnitude heuristic.
+                chain.append(CommitteeWatcher(self.committee_calculators))
+            self.watchers = chain
         self.quarantine_dir = Path(quarantine_dir)
         self.dft_fmt = dft_fmt
         self.stop_on = stop_on
+
+    @classmethod
+    def from_calculators(cls, calculators: Sequence, *, primary: int = 0, **kw):
+        """Build a relaxer whose committee is every calculator but one.
+
+        ``calculators[primary]`` drives the relaxation; the remaining
+        calculators are wired as ``committee_calculators`` so the
+        default chain gains a :class:`CommitteeWatcher`.  Passing
+        ``watchers`` explicitly still overrides the whole chain, in
+        which case the committee is not mounted.
+        """
+        calcs = list(calculators)
+        if not calcs:
+            raise ValueError("from_calculators needs at least one calculator")
+        if not 0 <= primary < len(calcs):
+            raise ValueError(f"primary index {primary} out of range for {len(calcs)} calculators")
+        main = calcs[primary]
+        committee = [calc for idx, calc in enumerate(calcs) if idx != primary]
+        kw.setdefault("committee_calculators", committee)
+        return cls(main, **kw)
 
     # ------------------------------------------------------------------
     # Public API
@@ -80,6 +111,14 @@ class GuardedRelaxer:
 
         try:
             opt = self._make_optimizer(atoms)
+            # ``max_steps`` is a *total* optimizer-step budget shared by
+            # every guard iteration, not a per-iteration cap.  ASE's
+            # ``opt.run()`` stops only on convergence and defaults to a
+            # 1e8-step budget, so a calculator whose residual force
+            # plateaus above ``fmax`` used to spin inside one call
+            # forever -- which is what the dummy backend did once the
+            # demo tolerance dropped to 0.01 eV/A below its force floor.
+            budget = self.max_steps
             for step in range(self.max_steps):
                 result.n_steps = step + 1
                 forces = atoms.get_forces()
@@ -102,9 +141,24 @@ class GuardedRelaxer:
                     )
                     result.quarantine_path = rec.dft_input_path
                     break
-                opt.run(fmax=self.fmax)
+                done_before = opt.get_number_of_steps()
+                opt.run(fmax=self.fmax, steps=budget)
+                # ASE accumulates its own budget across run() calls
+                # (self.max_steps = self.nsteps + steps), so the delta is
+                # exactly what this call spent.
+                budget -= opt.get_number_of_steps() - done_before
                 if opt.converged():
                     result.converged = True
+                    break
+                if budget <= 0:
+                    # A silent converged=False is a black box for
+                    # provenance, and the Cu/Ni note measured a residual
+                    # force of 0.0099 eV/A against a shipped 0.01
+                    # tolerance -- close enough to exhaust the budget on
+                    # a real backend, which must not pass unnoticed.
+                    result.reasons.append(
+                        f"step_budget_exhausted after {self.max_steps} optimizer steps"
+                    )
                     break
         except Exception as exc:  # noqa: BLE001
             result.reasons.append(f"relax_exception={exc!r}")
@@ -159,17 +213,19 @@ class GuardedRelaxer:
         raise ValueError(f"unknown optimizer {self.optimizer!r}")
 
     def _aggregate(self, atoms, forces: np.ndarray) -> WatchResult:  # noqa: D401
-        scores, reasons = [], []
-        for w in self.watchers:
-            r = w(atoms, forces)
-            scores.append(r.score)
-            if r.reason:
-                reasons.append(r.reason)
+        # Keep every watcher's full result: the reason reported for the
+        # winning watcher must come from that same watcher.  The old
+        # code indexed a reasons list compacted to non-empty entries,
+        # so any empty-reason watcher ahead of the argmax shifted the
+        # index (and an all-empty prefix raised IndexError, aborting
+        # the relaxation as relax_exception).
+        results = [w(atoms, forces) for w in self.watchers]
+        scores = [r.score for r in results]
         if self.stop_on == "any":
             idx = int(np.argmax(scores))
-            return WatchResult(score=float(scores[idx]), reason=reasons[idx] if reasons else "")
+            return WatchResult(score=float(scores[idx]), reason=results[idx].reason)
         score = float(np.mean(scores))
-        return WatchResult(score=score, reason="; ".join(reasons))
+        return WatchResult(score=score, reason="; ".join(r.reason for r in results if r.reason))
 
     @staticmethod
     def _worst_atom(watch: WatchResult, atoms) -> int:  # noqa: D401

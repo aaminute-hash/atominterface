@@ -25,6 +25,7 @@ import inspect
 import sys
 import warnings
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -219,7 +220,9 @@ def relax_candidate(atoms, backend, fmax=0.2, steps=80):
 
 def summarize(candidates, outdir: Path):
     outdir.mkdir(exist_ok=True)
-    rows = []
+    # Heterogeneous report rows (int/str/float per column); consumers
+    # coerce at the use site (float(...) / str(...)).
+    rows: list[dict[str, Any]] = []
     for i, atoms in enumerate(candidates):
         n = len(atoms)
         area = np.linalg.norm(np.cross(atoms.cell[0], atoms.cell[1]))
@@ -242,9 +245,10 @@ def summarize(candidates, outdir: Path):
         f"{'von_mises':>10} {'area/A^2':>10} {'natoms':>7}"
     )
     for r in rows:
-        vm_str = "  -  " if np.isnan(r["von_mises_strain"]) else f"{r['von_mises_strain']:+.4f}"
+        strain = float(r["von_mises_strain"])
+        vm_str = "  -  " if np.isnan(strain) else f"{strain:+.4f}"
         print(
-            f"{r['id']:>3}  {r['termination'][:35]:35} {r['film_supercell']:>12} "
+            f"{r['id']:>3}  {str(r['termination'])[:35]:35} {r['film_supercell']:>12} "
             f"{r['substrate_supercell']:>12} {vm_str:>10} {r['area_A2']:10.2f} {r['natoms']:7d}"
         )
 
