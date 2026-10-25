@@ -3,7 +3,7 @@ name = "atominterface"
 version = "0.1.0"
 description = "Reliable interface modeling for AI4S: coherent interface builder + uMLIP guard layer + thermodynamic profiler."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
     {name = "AtomInterface contributors"}
@@ -14,6 +14,8 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Topic :: Scientific/Engineering :: Physics",
 ]
@@ -32,9 +34,9 @@ dev = [
     "pytest>=7",
     "pytest-cov",
     "ruff>=0.17.1,<0.18",
-    # No upper bound: mypy 2.x is only installable on Python >=3.10, so the
-    # resolver picks 1.19 on 3.9 and 2.x on newer interpreters. The code is
-    # kept clean under both.
+    # No upper bound: every supported interpreter (>=3.12) resolves to mypy 2.x,
+    # which is required because the numpy stubs use PEP 695 ``type`` statements
+    # that mypy 1.x cannot parse.
     "mypy>=1.0",
     "pyyaml",
 ]
@@ -53,7 +55,7 @@ include = ["atominterface*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "B", "PL", "UP", "SIM", "TCH"]
@@ -83,6 +85,9 @@ ignore = [
 # package __init__ files re-export at the bottom to keep constants/dataclasses grouped
 "src/atominterface/__init__.py" = ["E402"]
 "src/atominterface/physics/__init__.py" = ["E402"]
+# The relax guard layer is frozen by product decision: no edits until the
+# Phase 0.3 review reopens it, even for cosmetic import modernisation.
+"src/atominterface/relax/*.py" = ["UP035"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -99,7 +104,7 @@ filterwarnings = [
     "ignore::UserWarning",
 ]
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

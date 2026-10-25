@@ -80,7 +80,10 @@ def _numeric_data(data: Any, size: int, source: str, *, allow_unknown: bool) -> 
     if not allow_unknown and not known.all():
         raise ValueError(f"{source} must contain a finite real charge for every atom")
     values = np.asarray(
-        [_real_number(value, source) if present else 0.0 for value, present in zip(raw, known)],
+        [
+            _real_number(value, source) if present else 0.0
+            for value, present in zip(raw, known, strict=True)
+        ],
         dtype=float,
     )
     sources = np.where(known, source, "unknown")
@@ -776,7 +779,7 @@ def termination_cuts(generator: Any) -> list:
     levels = np.unique(np.round(generator.oriented_unit_cell.frac_coords[:, 2] % 1, 10))
     following = np.r_[levels[1:], levels[0] + 1]
     slabs = []
-    for a, b in zip(levels, following):
+    for a, b in zip(levels, following, strict=True):
         try:
             slabs.append(generator.get_slab(shift=float((a + b) / 2 % 1)))
         except Exception as exc:  # noqa: BLE001

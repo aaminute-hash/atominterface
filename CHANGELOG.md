@@ -32,6 +32,11 @@
   instead of an implicit `-1.0` fudge.
 - `Candidate.atoms` is now the ASE `Atoms` view, as its docstring always
   claimed; it was leaking a pymatgen `Structure` and every exporter raised.
+- **Python floor is now 3.12** (`requires-python >= 3.12`, CI matrix
+  3.12/3.13, ruff `target-version = py312`, mypy `python_version = 3.12`).
+  The old 3.9-3.12 matrix could not stay green: pymatgen 2026.10 requires
+  >= 3.11 and numpy 2.5 requires >= 3.12, while the mypy 1.x resolved on
+  3.9/3.10 cannot parse the PEP 695 `type` statements in the numpy stubs.
 
 ### Fixed
 - `make_supercell` was mutating the source slab (newer pymatgen defaults to
