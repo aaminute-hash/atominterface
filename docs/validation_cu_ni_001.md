@@ -49,6 +49,14 @@ reference slabs, so `gamma_int` is independent of *which* bulk
 reference is used **only if the same reference is used on both sides
 and the reference slabs carry the same layer counts as the interface**.
 
+The driver now treats that dependency graph as a validity contract, not just
+an equation. `valid=true` requires finite energies for both pristine and
+coherent bulk references; all three guarded relaxations (both reference slabs
+and the interface) must have finite energies and forces and must converge
+without OOD or a calculator exception. If any node fails, the row and structures remain available for
+diagnosis, but all γ cells are empty and the process exits non-zero. A missing
+γ is therefore distinct from a physically computed value of zero.
+
 ## 3. Thickness convergence (the headline table)
 
 `--min-thickness` swept, vacuum fixed at 15 Å:
@@ -202,12 +210,13 @@ The reason belongs to the winning watcher; no `relax_exception`. Before
 the fix this shape (empty-reason prefix ahead of the argmax) raised
 `IndexError` inside the guard and aborted the relaxation.
 
-**Caveat on the CSV `ood_score` column:** every row in the tables above
-shows `0.000000`. That is the default for a single-model run — the
-demo mounts no committee, so `CommitteeWatcher` is absent from the chain
-and the geometric watchers score 0 on these clean fcc structures. The
-column is not evidence that the structures are in-distribution; it is
-evidence that no committee was asked.
+**Reading OOD fields:** the single-model rows in the tables above have
+`committee_enabled=false` and `ood_monitoring=heuristics_only`. Their
+`ood_score=0.000000` says that the geometry and force-magnitude watchers did
+not fire; it is not evidence that the structures are in-distribution. Only a
+run with `committee_enabled=true` queried model disagreement. The explicit
+fields prevent the old ambiguous zero from being mistaken for a committee
+certificate.
 
 ## 9. Reproducibility
 
@@ -260,6 +269,18 @@ never asserts dummy forces.
 python examples/03_interface_energy.py --backend mace --device cpu \
     --min-thickness 14.4 --outdir outputs/energy_cu_ni
 ```
+
+A fail-closed wiring check is reproducible without model weights:
+
+```bash
+python examples/03_interface_energy.py --backend dummy --max-steps 1 \
+    --fmax 0.000001 --outdir outputs/energy_invalid
+```
+
+That command must exit non-zero while retaining `candidates.csv` with
+`valid=False`, explicit `invalid_reasons`, and empty
+`gamma_surf_sub_eV_A2`, `gamma_surf_film_eV_A2`, `gamma_eV_per_A2`, and
+`gamma_J_per_m2` cells.
 
 14.4 Å is also the *default*: the demo used to default to 6.0 Å, which
 cuts only 4 Cu / 4 Ni layers and reports γ_Ni = 1.979 J/m² and γ_int =
