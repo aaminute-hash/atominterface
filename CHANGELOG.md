@@ -1,5 +1,45 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `atominterface.relax.proximity`: minimum-image distance helpers
+  (`minimum_image_distances`, `nearest_image_vectors`,
+  `pairwise_distance_matrix`, `pairwise_min_distance`) built on
+  `ase.geometry.find_mic`, so skewed cells and mixed `pbc` masks are
+  handled.
+- `NeighborWatcher` results now carry `per_atom` (each atom's relative
+  bond shortfall) and `meta["threshold"]` / `meta["min_pair"]`.
+- `CommitteeWatcher` results now carry `meta["committee_state"]`
+  (`disabled` / `unavailable` / `degraded` / `ok`) plus
+  `committee_requested` / `committee_members` / `committee_failed`.
+- `cut_cluster()` accepts `record=` and fills
+  `QuarantineRecord.cluster_indices`; the kept indices are also on
+  `cluster.info["cluster_indices"]`.
+
+### Fixed
+- **`NeighborWatcher` ignored periodic boundaries.** Distances were bare
+  cartesian, so a contact straddling the cell edge of a slab cell was
+  invisible. Distances are now minimum-image.
+- **`NeighborWatcher`'s threshold drifted with the vacuum.** It was
+  `mean(|a_i|) / 10 * 0.6`, so thickening a slab's vacuum from 10 A to
+  40 A raised it from 0.6 A to 1.2 A and could flip a clean structure
+  to out-of-distribution with no change to the geometry. The threshold
+  is now `min_dist_frac * (r_i + r_j)` over the covalent radii of the
+  bonded pair -- a local length scale.
+- **`cut_cluster()` ignored its own `include_images` flag.** The
+  neighbour across the periodic boundary was dropped from the cluster
+  cut to investigate it. Images are now honoured, and each source atom
+  is emitted at the image nearest the centre so the result is one
+  contiguous ball.
+- **`QuarantineRecord.cluster_indices` was never assigned.**
+- **A committee that could not run was indistinguishable from one that
+  agreed.** Both scored `0.0`; an unusable committee now reports
+  `committee_state="unavailable"` (or `"degraded"` when some members
+  were dropped) and `reason="committee_unavailable"`.
+- **`cut_cluster()` accepted an out-of-range `center_index` silently.**
+  It now raises `IndexError` instead of cutting around index 0.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added
