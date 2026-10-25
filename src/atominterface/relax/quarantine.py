@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .proximity import nearest_image_vectors
+
 if TYPE_CHECKING:
     from ase.atoms import Atoms
 
@@ -33,19 +35,58 @@ def cut_cluster(
     radius: float = 6.0,
     *,
     include_images: bool = True,
+    record: QuarantineRecord | None = None,
 ) -> Atoms:  # noqa: D401
     """Return a new Atoms containing atoms within ``radius`` of the center.
 
-    This is a minimal reference implementation.  Production code should
-    use a neighbour list and honour PBC images.
+    With ``include_images`` (the default) distances are minimum-image
+    distances and every selected atom is emitted at the image nearest
+    the center, so a neighbour sitting across a periodic boundary is
+    included *and* the result is one contiguous ball rather than two
+    fragments at opposite faces of the cell.  Each source atom
+    contributes at most one entry, which keeps ``len(cluster) <=
+    len(atoms)`` and keeps ``cluster_indices`` a 1:1 map back to the
+    parent structure.  With ``include_images=False`` the distance is a
+    bare cartesian one -- the pre-PBC behaviour, kept explicit.
+
+    ``radius`` is measured from the center atom, which is therefore
+    always included.  An out-of-range ``center_index`` raises instead of
+    silently falling back to index 0: a quarantine anchored on the wrong
+    atom is a DFT single-point that says nothing about the OOD event.
+
+    Passing ``record`` fills its :attr:`QuarantineRecord.cluster_indices`
+    with the indices kept (ascending); the same list is always available
+    as ``cluster.info["cluster_indices"]``.
     """
-    pos = atoms.positions
+    n = len(atoms)
+    if not 0 <= center_index < n:
+        raise IndexError(f"center_index {center_index} out of range for {n} atoms")
+
+    pos = np.asarray(atoms.positions, dtype=float)
     center = pos[center_index]
-    dists = np.linalg.norm(pos - center, axis=1)
-    keep = np.where(dists <= radius)[0].tolist()
+    if include_images and np.any(np.asarray(atoms.pbc, dtype=bool)):
+        vectors, dists = nearest_image_vectors(atoms, center)
+        cluster_pos = center + vectors
+    else:
+        dists = np.linalg.norm(pos - center, axis=1)
+        cluster_pos = pos
+    keep = np.where(dists <= radius)[0]
+
     from ase.atoms import Atoms
 
-    return Atoms(numbers=atoms.numbers[keep], positions=pos[keep], cell=atoms.cell, pbc=atoms.pbc)
+    cluster = Atoms(
+        numbers=atoms.numbers[keep],
+        positions=cluster_pos[keep],
+        cell=atoms.cell,
+        pbc=atoms.pbc,
+    )
+    indices = [int(i) for i in keep]
+    cluster.info["cluster_indices"] = list(indices)
+    cluster.info["center_index"] = int(center_index)
+    cluster.info["cut_radius"] = float(radius)
+    if record is not None:
+        record.cluster_indices = list(indices)
+    return cluster
 
 
 def write_dft_input(
