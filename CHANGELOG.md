@@ -39,6 +39,34 @@
   were dropped) and `reason="committee_unavailable"`.
 - **`cut_cluster()` accepted an out-of-range `center_index` silently.**
   It now raises `IndexError` instead of cutting around index 0.
+- **Energy results failed open.** `examples/03_interface_energy.py`
+  returned exit code 0 and wrote a plausible gamma whether or not the
+  slabs converged, OOD tripped or the calculator raised. `RelaxResult`
+  gained `valid` / `final_energy` / `energies_finite` / `forces_finite`
+  / `exception`; gamma is only computed when the substrate slab, the
+  film slab, the interface and every reference state are valid, an
+  invalid candidate keeps its diagnostics but leaves gamma empty, and
+  the batch exits non-zero.
+- **Model-loading failures were swallowed.** `mace_.py` silently fell
+  back through every tier, and `GuardedRelaxer._wrap()` fabricated a
+  zero-force calculator for anything it could not construct. Both now
+  raise with the full chain of causes.
+- **`ood_score=0` was readable as "in distribution".** CSV and metadata
+  now carry `committee_enabled` and `ood_monitoring` explicitly.
+
+### Changed
+- `GuardedRelaxer` evaluates the watcher chain after **every optimizer
+  step** (through `irun()`), not only at guard-iteration boundaries: a
+  transient excursion inside one `opt.run()` call can no longer hide
+  behind benign final forces.
+- `_aggregate()` forwards `per_atom` and `meta` from the winning
+  watcher, so a quarantine cluster anchors on the worst atom instead of
+  always atom 0, and committee state reaches the result.
+- `RelaxResult.metadata` now carries `committee_state`
+  (`not_configured` / `disabled` / `unavailable` / `degraded` / `ok`),
+  resolved worst-first; `unavailable` also overrides `ood_monitoring`
+  and appends a reason, so a monitoring outage can never be read as
+  consensus.
 
 ## [0.2.0] - 2026-10-25
 
