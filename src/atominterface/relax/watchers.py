@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
+from ase.data import covalent_radii
+
+from .proximity import pairwise_distance_matrix
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -24,28 +27,93 @@ class WatchResult:
     meta: dict = field(default_factory=dict)
 
 
+# ``WatchResult.meta["committee_state"]`` values.  A committee that was
+# never asked for, one that produced no usable member and one that
+# produced a perfect consensus all score 0.0; the state is what tells
+# them apart, so a monitoring failure can never be read as agreement.
+COMMITTEE_DISABLED = "disabled"
+COMMITTEE_UNAVAILABLE = "unavailable"
+COMMITTEE_DEGRADED = "degraded"
+COMMITTEE_OK = "ok"
+
+
 class NeighborWatcher:
-    """Flag overlapping atoms and abnormally short bonds."""
+    """Flag overlapping atoms and abnormally short bonds.
+
+    The "too short" threshold is ``min_dist_frac * (r_i + r_j)`` over the
+    covalent radii of the bonded pair, so it depends only on the local
+    chemistry.  It used to be derived from the mean cell-vector length,
+    which made the very same local geometry score differently depending
+    on how much vacuum a slab happened to carry: thickening the vacuum
+    raised the threshold and could turn a clean structure into an OOD
+    one.
+
+    Distances are minimum-image distances, so an overlap straddling a
+    periodic boundary is seen.  ``per_atom`` carries each atom's
+    relative bond shortfall, which is what lets the guard anchor a
+    quarantine cluster on the offending atom instead of index 0.
+    """
+
+    # Covalent radii are tabulated per element; a species outside the
+    # table (or the ASE dummy Z=0) falls back to this mid-table value so
+    # the threshold stays a local length scale rather than becoming 0.
+    fallback_radius: float = 0.7
 
     def __init__(self, min_dist_frac: float = 0.6) -> None:
-        self.min_dist_frac = min_dist_frac
+        self.min_dist_frac = float(min_dist_frac)
+
+    @classmethod
+    def covalent_radii_for(cls, numbers: Sequence[int]) -> np.ndarray:
+        """Covalent radius per atom, with a fallback for unknown species."""
+        table = np.asarray(covalent_radii, dtype=float)
+        z = np.asarray(numbers, dtype=int)
+        known = (z > 0) & (z < len(table))
+        radii = np.full(len(z), cls.fallback_radius, dtype=float)
+        radii[known] = table[z[known]]
+        return radii
 
     def __call__(self, atoms, forces: np.ndarray) -> WatchResult:  # noqa: D401
-        pos = atoms.positions
-        n = len(pos)
+        n = len(atoms)
         if n < 2:
+            # A single atom has no pair to be too close to.
             return WatchResult()
-        # crude pairwise check (demo; production should use neighbour list)
-        min_d = 1e9
-        for i in range(n - 1):
-            d = np.linalg.norm(pos[i + 1 :] - pos[i], axis=1).min()
-            min_d = min(min_d, d)
-        # scale threshold by cell length as a stand-in for covalent radius
-        scale = float(np.mean(np.linalg.norm(atoms.cell, axis=1))) / 10.0
-        threshold = max(scale * self.min_dist_frac, 0.5)
-        score = 0.0 if min_d > threshold else min(1.0, threshold / max(min_d, 1e-6))
-        reason = "" if score == 0.0 else f"min_pairwise_dist={min_d:.3f}A < {threshold:.3f}A"
-        return WatchResult(score=score, reason=reason, meta={"min_dist": float(min_d)})
+
+        dm = pairwise_distance_matrix(atoms)
+        nearest = dm.min(axis=1)
+        partner = dm.argmin(axis=1)
+
+        radii = self.covalent_radii_for(atoms.numbers)
+        # Per-pair threshold: the tightest bond is judged against the two
+        # elements that actually form it.
+        pair_threshold = self.min_dist_frac * (radii[:, None] + radii[None, :])
+        threshold = pair_threshold[np.arange(n), partner]
+        # Guard the division below; radii are > 0, so this only bites on a
+        # degenerate ``min_dist_frac`` of zero or less.
+        threshold = np.maximum(threshold, 1e-12)
+
+        # Relative shortfall in [0, 1]: 0 at or beyond the threshold, -> 1
+        # as the bond collapses.  Monotone in the bond length, so argmax
+        # is the worst-bound atom even when several violate at once.
+        per_atom = np.clip(1.0 - nearest / threshold, 0.0, 1.0)
+
+        worst = int(np.argmax(per_atom))
+        min_d = float(nearest[worst])
+        worst_threshold = float(threshold[worst])
+        # Saturating, as before: once a bond is too short the signal is
+        # binary for the guard's threshold comparison.
+        score = 0.0 if per_atom[worst] <= 0.0 else min(1.0, worst_threshold / max(min_d, 1e-6))
+        reason = "" if score == 0.0 else f"min_pairwise_dist={min_d:.3f}A < {worst_threshold:.3f}A"
+        return WatchResult(
+            score=float(score),
+            reason=reason,
+            per_atom=per_atom,
+            meta={
+                "min_dist": min_d,
+                "threshold": worst_threshold,
+                "min_pair": [worst, int(partner[worst])],
+                "global_min_dist": float(nearest.min()),
+            },
+        )
 
 
 class ForceNormWatcher:
@@ -76,6 +144,15 @@ class CommitteeWatcher:
     guard already computed and scores the spread between them.  A
     member that fails (non-standard interface, broken model) is
     skipped: the guard must never crash inside its own monitoring.
+
+    Skipping must not be silent.  A committee that was never configured,
+    one whose every member failed, and one that unanimously agrees all
+    produce ``score == 0.0``; only ``meta["committee_state"]`` separates
+    "we checked and the models concur" from "we could not check at all".
+    The states are :data:`COMMITTEE_DISABLED` (no member configured),
+    :data:`COMMITTEE_UNAVAILABLE` (configured, none usable),
+    :data:`COMMITTEE_DEGRADED` (some members dropped) and
+    :data:`COMMITTEE_OK`.
     """
 
     def __init__(self, calculators: Sequence | None = None, *, scale: float = 1.0) -> None:
@@ -87,13 +164,48 @@ class CommitteeWatcher:
 
     @staticmethod
     def from_force_arrays(force_arrays: Sequence[np.ndarray]) -> WatchResult:
+        """Score the spread of a set of force arrays.
+
+        Fewer than two arrays cannot disagree, which is a *missing
+        committee*, not an agreeing one -- the result carries the
+        ``unavailable`` state instead of an indistinguishable zero.
+        """
         if len(force_arrays) < 2:
-            return WatchResult()
+            return WatchResult(
+                meta={
+                    "committee_state": COMMITTEE_UNAVAILABLE,
+                    "committee_members": 0,
+                    "committee_requested": len(force_arrays),
+                    "committee_failed": len(force_arrays),
+                }
+            )
         arr = np.asarray(force_arrays)
         per_atom = float(np.linalg.norm(arr.std(axis=0), axis=1).mean())
         score = float(min(1.0, per_atom))
         return WatchResult(
-            score=score, reason="committee_disagreement", meta={"disagreement": per_atom}
+            score=score,
+            reason="committee_disagreement" if score > 0.0 else "",
+            meta={
+                "disagreement": per_atom,
+                "committee_state": COMMITTEE_OK,
+                "committee_members": len(force_arrays) - 1,
+                "committee_requested": len(force_arrays) - 1,
+                "committee_failed": 0,
+            },
+        )
+
+    @staticmethod
+    def _unavailable(requested: int, failed: int) -> WatchResult:
+        """No usable committee: an explicit state, never a silent zero."""
+        return WatchResult(
+            score=0.0,
+            reason="committee_unavailable",
+            meta={
+                "committee_state": COMMITTEE_UNAVAILABLE,
+                "committee_members": 0,
+                "committee_requested": int(requested),
+                "committee_failed": int(failed),
+            },
         )
 
     @staticmethod
@@ -123,9 +235,17 @@ class CommitteeWatcher:
 
     def __call__(self, atoms, forces: np.ndarray) -> WatchResult:  # noqa: D401
         if not self.calculators:
-            # Not enabled: a single array has no disagreement by
-            # definition, matching the static method's <2 guard.
-            return self.from_force_arrays([forces])
+            # Not enabled.  "We did not ask" is a different statement from
+            # "we asked and the models agree"; the guard must be able to
+            # see which one it got.
+            return WatchResult(
+                meta={
+                    "committee_state": COMMITTEE_DISABLED,
+                    "committee_members": 0,
+                    "committee_requested": 0,
+                    "committee_failed": 0,
+                }
+            )
         primary = np.asarray(forces, dtype=np.float64)
         arrays = [primary]
         for calc in self.calculators:
@@ -136,7 +256,16 @@ class CommitteeWatcher:
             if arr.shape != primary.shape:
                 continue  # unusable member (wrong atom count/layout): skip
             arrays.append(arr)
-        if len(arrays) >= 2:
-            return self.from_force_arrays(arrays)
-        # Every member failed: fall back to the primary forces alone.
-        return self.from_force_arrays([primary])
+        requested = len(self.calculators)
+        failed = requested - (len(arrays) - 1)
+        if len(arrays) < 2:
+            # Every member failed or returned an unusable array.  The
+            # score is 0 because there is nothing to compare, and the
+            # state says so -- a monitoring outage is not consensus.
+            return self._unavailable(requested, failed)
+        result = self.from_force_arrays(arrays)
+        result.meta["committee_state"] = COMMITTEE_OK if failed == 0 else COMMITTEE_DEGRADED
+        result.meta["committee_requested"] = requested
+        result.meta["committee_members"] = len(arrays) - 1
+        result.meta["committee_failed"] = failed
+        return result
