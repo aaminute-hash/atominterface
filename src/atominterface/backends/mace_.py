@@ -36,9 +36,10 @@ def mace_cache_path() -> Path:
     """
     try:
         from mace.tools.utils import get_cache_dir  # type: ignore[import-untyped]
-    except Exception:  # noqa: BLE001
-        # mace-torch too old (or broken) to expose the helper: fall back
-        # to the XDG cache location mace-torch itself documents.
+    except ImportError:
+        # Older mace-torch releases do not expose the helper. Fall back
+        # only for that known compatibility case; a broken installation
+        # must remain visible to the caller.
         base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
         cache_dir = base / "mace"
     else:
@@ -98,9 +99,10 @@ def _instantiate(cls: Any, device: str, **weight_kwargs: Any) -> Any:
 
     mace-torch renamed the weights argument across releases
     (``model_path`` -> ``model_paths``); the caller passes the tiers as
-    keyword arguments, which dict ordering preserves. A ``TypeError``
-    means "this spelling does not exist here", so the next tier is tried
-    and an error is raised only once every spelling has been rejected.
+    keyword arguments, which dict ordering preserves. Every constructor
+    failure is retained in the final diagnostic; this includes signature
+    mismatches as well as checkpoint, device and runtime failures. The
+    final exception is chained from the last attempted constructor.
 
     Args:
         cls: ``MACECalculator`` (or a compatible drop-in).
@@ -114,14 +116,16 @@ def _instantiate(cls: Any, device: str, **weight_kwargs: Any) -> Any:
         RuntimeError: If every weights kwarg spelling was rejected.
     """
     attempts: list[str] = []
+    last_error: Exception | None = None
     for key, value in weight_kwargs.items():
         try:
             return cls(**{key: value}, device=device)
-        except (TypeError, ValueError, OSError) as exc:
-            attempts.append(f"{key}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            attempts.append(f"{key}: {type(exc).__name__}: {exc}")
+            last_error = exc
     raise RuntimeError(
-        f"could not construct {cls.__name__}; every weights argument was rejected: {attempts}"
-    )
+        f"could not construct {cls.__name__}; every weights argument failed: {attempts}"
+    ) from last_error
 
 
 def _load_default(cls: Any, device: str) -> Any:
@@ -147,23 +151,30 @@ def _load_default(cls: Any, device: str) -> Any:
     Raises:
         RuntimeError: If the checkpoint cannot be obtained (e.g. offline).
     """
+    attempts: list[str] = []
     try:
         from mace.calculators import mace_mp  # type: ignore[import-untyped]
-    except Exception:  # noqa: BLE001
-        # helper unavailable (older mace-torch): fall through to a manual download
+    except Exception as exc:  # noqa: BLE001
+        attempts.append(f"mace_mp import: {type(exc).__name__}: {exc}")
         mace_mp = None  # type: ignore[assignment]
     if mace_mp is not None:
         try:
             return mace_mp(model="medium", device=device)
-        except Exception:  # noqa: BLE001
-            pass  # helper failed (old signature, unreadable cache, network); retry manually
-    local_path = _download_default_weights()
-    return _instantiate(
-        cls,
-        device,
-        model_paths=[str(local_path)],
-        model_path=str(local_path),
-    )
+        except Exception as exc:  # noqa: BLE001
+            attempts.append(f"mace_mp helper: {type(exc).__name__}: {exc}")
+    try:
+        local_path = _download_default_weights()
+        return _instantiate(
+            cls,
+            device,
+            model_paths=[str(local_path)],
+            model_path=str(local_path),
+        )
+    except Exception as exc:  # noqa: BLE001
+        attempts.append(f"manual checkpoint: {type(exc).__name__}: {exc}")
+        raise RuntimeError(
+            f"failed to load the default MACE-MP-0 medium model; all attempts failed: {attempts}"
+        ) from exc
 
 
 def _factory(**kwargs):  # noqa: D401

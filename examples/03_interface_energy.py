@@ -18,9 +18,15 @@ one calculator setting (same backend, same device) for every term:
 
 Outputs (in --outdir, default outputs/energy_cu_ni):
 
-  candidates.csv   one-row energy ledger (bulk/slab/interface/gamma/OOD)
-  metadata.yaml    provenance: backend identity, seed, artifact hash
-  *.extxyz         relaxed interface, reference slabs and bulk inputs
+  candidates.csv   one-row ledger with energy-validity and OOD diagnostics
+  metadata.yaml    provenance: backend identity, seed, validity, artifact hash
+  *.extxyz         final interface, reference slabs and bulk inputs
+
+Gamma values are emitted only when every pristine/coherent bulk reference
+energy is finite and both reference slabs plus the interface pass finite
+energy/force, convergence and OOD checks. Invalid runs keep their diagnostic
+row and structures, leave gamma cells empty, and exit non-zero. A zero
+``ood_score`` with ``committee_enabled=false`` means no committee was queried.
 
 The dummy backend runs the whole chain as a wiring self-test, but its
 energies carry no physical meaning; --backend mace (the default) is the
@@ -32,8 +38,11 @@ machine-load dependent) can flip the last written decimal; reruns in
 the same process are bit-identical.
 
 Run:
-    python examples/03_interface_energy.py --backend dummy
+    python examples/03_interface_energy.py --backend dummy --fmax 0.05
     python examples/03_interface_energy.py --backend mace --device cpu
+
+Fail-closed demonstration (non-zero exit, empty gamma cells):
+    python examples/03_interface_energy.py --backend dummy --max-steps 1 --fmax 1e-6
 """
 
 from __future__ import annotations
@@ -90,6 +99,15 @@ CSV_FIELDS = [
     "gamma_surf_film_eV_A2",
     "gamma_eV_per_A2",
     "gamma_J_per_m2",
+    "valid",
+    "converged",
+    "energies_finite",
+    "slab_sub_valid",
+    "slab_film_valid",
+    "interface_valid",
+    "invalid_reasons",
+    "committee_enabled",
+    "ood_monitoring",
     "ood_score",
     "ood_step",
     "ood_triggered",
@@ -183,7 +201,13 @@ def _single_point(atoms, calculator) -> tuple[float, object]:
     """
     measured = atoms.copy()
     measured.calc = calculator(measured)
-    return float(measured.get_potential_energy()), measured
+    energy = float(measured.get_potential_energy())
+    forces = np.asarray(measured.get_forces(), dtype=float)
+    if not np.isfinite(energy):
+        raise ValueError("single-point energy is not finite")
+    if not np.all(np.isfinite(forces)):
+        raise ValueError("single-point forces are not finite")
+    return energy, measured
 
 
 def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
@@ -231,7 +255,10 @@ def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
             scale_atoms=True,
         )
         strained.calc = calculator(strained)
-        energies.append(float(strained.get_potential_energy()))
+        energy = float(strained.get_potential_energy())
+        if not np.isfinite(energy):
+            raise ValueError(f"coherent-bulk energy is not finite at out-of-plane strain {sz}")
+        energies.append(energy)
     profile = np.asarray(energies, dtype=float)
     index = int(np.argmin(profile))
     if index in (0, len(grid) - 1):
@@ -320,9 +347,9 @@ def _relax_ledger(candidate, reference_sub, reference_film, calculator, args, ou
     relax_film = _guarded_relax(reference_film, calculator, **relax_kwargs)
     relax_interface = _guarded_relax(candidate.atoms, calculator, **relax_kwargs)
     energies = (
-        float(relax_sub.atoms.get_potential_energy()),
-        float(relax_film.atoms.get_potential_energy()),
-        float(relax_interface.atoms.get_potential_energy()),
+        relax_sub.final_energy,
+        relax_film.final_energy,
+        relax_interface.final_energy,
     )
     return relax_sub, relax_film, relax_interface, energies
 
@@ -450,14 +477,21 @@ def _write_outputs(
         seed=SEED,
         cli_args={key: _jsonable(value) for key, value in vars(args).items()},
         artifacts={"candidates.csv": _sha256_file(csv_path)},
+        extra={
+            "valid": row["valid"] == "True",
+            "invalid_reasons": row["invalid_reasons"],
+            "committee_enabled": row["committee_enabled"] == "True",
+            "ood_monitoring": row["ood_monitoring"],
+        },
     )
     write_metadata(meta, outdir / "metadata.yaml")
     return csv_path
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
     """Run the Cu/Ni interface energy ledger; returns a process exit code."""
     from atominterface.physics import EV_A2_TO_J_M2
+    from atominterface.relax import RelaxResult
 
     args = _parse_args(argv)
     np.random.seed(SEED)
@@ -482,38 +516,149 @@ def main(argv: list[str] | None = None) -> int:
         f"mismatch={candidate.metadata['mismatch']:.4f}"
     )
 
-    calculator = _make_calculator(args.backend, args.device)
+    errors: list[str] = []
+
+    def record_error(stage: str, exc: Exception) -> None:
+        message = f"{stage}: {type(exc).__name__}: {exc}"
+        errors.append(message)
+        print(f"invalid: {message}")
+
+    calculator = None
+    try:
+        calculator = _make_calculator(args.backend, args.device)
+    except Exception as exc:  # noqa: BLE001
+        record_error("calculator", exc)
     print(f"backend  : {args.backend} (device {args.device})")
 
-    # Bulk single points: the pristine values are recorded per atom, the
-    # coherent ones (carrying the slab's in-plane strain) feed the
-    # termination energies -- see _coherent_bulk_energy.
-    e_bulk_sub, bulk_sub_measured = _single_point(substrate_atoms, calculator)
-    e_bulk_film, bulk_film_measured = _single_point(film_atoms, calculator)
-    e_bulk_sub_coh = _coherent_bulk_energy(
-        substrate_atoms, float(candidate.strain_substrate), calculator
-    )
-    e_bulk_film_coh = _coherent_bulk_energy(film_atoms, float(candidate.strain_film), calculator)
+    e_bulk_sub = None
+    e_bulk_film = None
+    e_bulk_sub_coh = None
+    e_bulk_film_coh = None
+    bulk_sub_measured = substrate_atoms.copy()
+    bulk_film_measured = film_atoms.copy()
+    if calculator is not None:
+        try:
+            e_bulk_sub, bulk_sub_measured = _single_point(substrate_atoms, calculator)
+        except Exception as exc:  # noqa: BLE001
+            record_error("bulk_sub_pristine", exc)
+        try:
+            e_bulk_film, bulk_film_measured = _single_point(film_atoms, calculator)
+        except Exception as exc:  # noqa: BLE001
+            record_error("bulk_film_pristine", exc)
+        try:
+            e_bulk_sub_coh = _coherent_bulk_energy(
+                substrate_atoms, float(candidate.strain_substrate), calculator
+            )
+        except Exception as exc:  # noqa: BLE001
+            record_error("bulk_sub_coherent", exc)
+        try:
+            e_bulk_film_coh = _coherent_bulk_energy(
+                film_atoms, float(candidate.strain_film), calculator
+            )
+        except Exception as exc:  # noqa: BLE001
+            record_error("bulk_film_coherent", exc)
 
-    # Reference slabs: same supercell, same strain, same termination as
-    # the interface side they reference.
-    reference_sub, reference_film = _reference_slabs(substrate, film, config, match, candidate)
-    relax_sub, relax_film, relax_interface, energies = _relax_ledger(
-        candidate, reference_sub, reference_film, calculator, args, outdir
+    references_ready = True
+    try:
+        reference_sub, reference_film = _reference_slabs(substrate, film, config, match, candidate)
+    except Exception as exc:  # noqa: BLE001
+        record_error("reference_slabs", exc)
+        references_ready = False
+        reference_sub = substrate_atoms.copy()
+        reference_film = film_atoms.copy()
+
+    def invalid_relax(atoms, message: str) -> RelaxResult:
+        return RelaxResult(
+            atoms=atoms.copy(),
+            exception=message,
+            reasons=[message],
+            metadata={"committee_enabled": False, "ood_monitoring": "heuristics_only"},
+        )
+
+    if calculator is not None and references_ready:
+        relax_sub, relax_film, relax_interface, energies = _relax_ledger(
+            candidate, reference_sub, reference_film, calculator, args, outdir
+        )
+    else:
+        message = "relaxation skipped because calculator or reference construction failed"
+        relax_sub = invalid_relax(reference_sub, message)
+        relax_film = invalid_relax(reference_film, message)
+        relax_interface = invalid_relax(candidate.atoms, message)
+        energies = (None, None, None)
+
+    relaxations = {
+        "slab_sub": relax_sub,
+        "slab_film": relax_film,
+        "interface": relax_interface,
+    }
+    for label, result in relaxations.items():
+        if result.valid:
+            continue
+        if result.exception:
+            errors.append(f"{label}: {result.exception}")
+        errors.extend(f"{label}: {reason}" for reason in result.reasons if reason)
+
+    identity = ""
+    backend_version = ""
+    identity_valid = True
+    try:
+        identity, backend_version = _identity(args)
+    except Exception as exc:  # noqa: BLE001
+        record_error("model_identity", exc)
+        identity_valid = False
+
+    required_energies = (e_bulk_sub, e_bulk_film, e_bulk_sub_coh, e_bulk_film_coh)
+    relaxation_valid = all(result.valid for result in relaxations.values())
+    chain_valid = (
+        references_ready
+        and identity_valid
+        and all(value is not None and np.isfinite(value) for value in required_energies)
+        and relaxation_valid
+        and all(value is not None and np.isfinite(value) for value in energies)
     )
+
+    area = float(candidate.area)
+    gamma_sub = None
+    gamma_film = None
+    gamma_int = None
+    if chain_valid:
+        try:
+            area, gamma_sub, gamma_film, gamma_int = _gammas(
+                candidate=candidate,
+                substrate_atoms=substrate_atoms,
+                film_atoms=film_atoms,
+                reference_sub=reference_sub,
+                reference_film=reference_film,
+                e_bulk_sub=e_bulk_sub_coh,
+                e_bulk_film=e_bulk_film_coh,
+                energies=energies,
+            )
+            if not np.all(np.isfinite([gamma_sub, gamma_film, gamma_int])):
+                raise ValueError("derived gamma values are not finite")
+        except Exception as exc:  # noqa: BLE001
+            record_error("gamma", exc)
+            gamma_sub = gamma_film = gamma_int = None
+    valid = chain_valid and gamma_int is not None
+    if not valid and not errors:
+        errors.append("energy chain failed validity checks")
+    errors = list(dict.fromkeys(errors))
+
+    def cell(value: float | None, digits: int = 6) -> str:
+        return "" if value is None else f"{value:.{digits}f}"
+
+    ood_result = max(relaxations.values(), key=lambda result: result.max_ood_score)
+    ood_triggered = any(result.ood_triggered for result in relaxations.values())
+    committee_enabled = any(
+        bool(result.metadata.get("committee_enabled", False)) for result in relaxations.values()
+    )
+    monitoring_modes = sorted(
+        {str(result.metadata.get("ood_monitoring", "unknown")) for result in relaxations.values()}
+    )
+    all_energies_finite = all(
+        value is not None and np.isfinite(value) for value in required_energies
+    ) and all(result.energies_finite for result in relaxations.values())
+    converged = all(result.converged for result in relaxations.values())
     e_slab_sub, e_slab_film, e_interface = energies
-
-    area, gamma_sub, gamma_film, gamma_int = _gammas(
-        candidate=candidate,
-        substrate_atoms=substrate_atoms,
-        film_atoms=film_atoms,
-        reference_sub=reference_sub,
-        reference_film=reference_film,
-        e_bulk_sub=e_bulk_sub_coh,
-        e_bulk_film=e_bulk_film_coh,
-        energies=energies,
-    )
-    identity, backend_version = _identity(args)
 
     row = {
         "rank": 1,
@@ -524,20 +669,37 @@ def main(argv: list[str] | None = None) -> int:
         "film_termination": candidate.film_termination,
         "area_A2": f"{area:.4f}",
         "n_atoms": candidate.total_atoms,
-        "E_bulk_sub_ev_per_atom": f"{e_bulk_sub / len(substrate_atoms):.6f}",
-        "E_bulk_film_ev_per_atom": f"{e_bulk_film / len(film_atoms):.6f}",
-        "E_bulk_sub_coh_ev_per_atom": f"{e_bulk_sub_coh / len(substrate_atoms):.6f}",
-        "E_bulk_film_coh_ev_per_atom": f"{e_bulk_film_coh / len(film_atoms):.6f}",
-        "E_slab_sub_ev": f"{e_slab_sub:.6f}",
-        "E_slab_film_ev": f"{e_slab_film:.6f}",
-        "E_interface_ev": f"{e_interface:.6f}",
-        "gamma_surf_sub_eV_A2": f"{gamma_sub:.6f}",
-        "gamma_surf_film_eV_A2": f"{gamma_film:.6f}",
-        "gamma_eV_per_A2": f"{gamma_int:.6f}",
-        "gamma_J_per_m2": f"{gamma_int * EV_A2_TO_J_M2:.4f}",
-        "ood_score": f"{relax_interface.max_ood_score:.6f}",
-        "ood_step": str(relax_interface.ood_step),
-        "ood_triggered": str(relax_interface.ood_triggered),
+        "E_bulk_sub_ev_per_atom": cell(
+            None if e_bulk_sub is None else e_bulk_sub / len(substrate_atoms)
+        ),
+        "E_bulk_film_ev_per_atom": cell(
+            None if e_bulk_film is None else e_bulk_film / len(film_atoms)
+        ),
+        "E_bulk_sub_coh_ev_per_atom": cell(
+            None if e_bulk_sub_coh is None else e_bulk_sub_coh / len(substrate_atoms)
+        ),
+        "E_bulk_film_coh_ev_per_atom": cell(
+            None if e_bulk_film_coh is None else e_bulk_film_coh / len(film_atoms)
+        ),
+        "E_slab_sub_ev": cell(e_slab_sub),
+        "E_slab_film_ev": cell(e_slab_film),
+        "E_interface_ev": cell(e_interface),
+        "gamma_surf_sub_eV_A2": cell(gamma_sub),
+        "gamma_surf_film_eV_A2": cell(gamma_film),
+        "gamma_eV_per_A2": cell(gamma_int),
+        "gamma_J_per_m2": cell(None if gamma_int is None else gamma_int * EV_A2_TO_J_M2, digits=4),
+        "valid": str(valid),
+        "converged": str(converged),
+        "energies_finite": str(all_energies_finite),
+        "slab_sub_valid": str(relax_sub.valid),
+        "slab_film_valid": str(relax_film.valid),
+        "interface_valid": str(relax_interface.valid),
+        "invalid_reasons": "; ".join(errors),
+        "committee_enabled": str(committee_enabled),
+        "ood_monitoring": ",".join(monitoring_modes),
+        "ood_score": f"{ood_result.max_ood_score:.6f}",
+        "ood_step": str(ood_result.ood_step),
+        "ood_triggered": str(ood_triggered),
         "backend": args.backend,
         "model_hash": identity,
     }
@@ -556,37 +718,52 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\n== energy ledger ==")
     print(
-        f"E_bulk  sub (Cu): {e_bulk_sub:10.4f} eV total | "
-        f"{e_bulk_sub / len(substrate_atoms):8.4f} eV/atom"
+        f"E_bulk  sub (Cu): {cell(e_bulk_sub, 4) or 'NA':>10} eV total | "
+        f"{cell(None if e_bulk_sub is None else e_bulk_sub / len(substrate_atoms), 4) or 'NA':>8} "
+        "eV/atom"
     )
     print(
         f"strain in-plane : sub {float(candidate.strain_substrate):+.4%} | "
         f"film {float(candidate.strain_film):+.4%}"
     )
+    if all(value is not None for value in required_energies):
+        print(
+            f"E_bulk coherent : sub {e_bulk_sub_coh / len(substrate_atoms):8.4f} eV/atom "
+            f"({(e_bulk_sub_coh - e_bulk_sub) / len(substrate_atoms):+.5f} vs pristine) | "
+            f"film {e_bulk_film_coh / len(film_atoms):8.4f} eV/atom "
+            f"({(e_bulk_film_coh - e_bulk_film) / len(film_atoms):+.5f} vs pristine)"
+        )
+    else:
+        print("E_bulk coherent : NA (invalid bulk reference)")
+    print(f"E_slab  sub     : {cell(e_slab_sub, 4) or 'NA':>10} eV (valid={relax_sub.valid})")
+    print(f"E_slab film     : {cell(e_slab_film, 4) or 'NA':>10} eV (valid={relax_film.valid})")
     print(
-        f"E_bulk coherent : sub {e_bulk_sub_coh / len(substrate_atoms):8.4f} eV/atom "
-        f"({(e_bulk_sub_coh - e_bulk_sub) / len(substrate_atoms):+.5f} vs pristine) | "
-        f"film {e_bulk_film_coh / len(film_atoms):8.4f} eV/atom "
-        f"({(e_bulk_film_coh - e_bulk_film) / len(film_atoms):+.5f} vs pristine)"
+        f"E_interface     : {cell(e_interface, 4) or 'NA':>10} eV (valid={relax_interface.valid})"
     )
-    # GuardedRelaxer.n_steps counts guard watch cycles, not optimizer
-    # steps (one opt.run() call relaxes to fmax, so a converged relax
-    # reports 1); the ledger therefore prints the convergence flag.
-    print(f"E_slab  sub     : {e_slab_sub:10.4f} eV (converged={relax_sub.converged})")
-    print(f"E_slab film     : {e_slab_film:10.4f} eV (converged={relax_film.converged})")
-    print(f"E_interface     : {e_interface:10.4f} eV (converged={relax_interface.converged})")
-    print(f"gamma_surf Cu   : {gamma_sub:10.4f} eV/A^2 = {gamma_sub * EV_A2_TO_J_M2:7.3f} J/m^2")
-    print(f"gamma_surf Ni   : {gamma_film:10.4f} eV/A^2 = {gamma_film * EV_A2_TO_J_M2:7.3f} J/m^2")
-    print(f"gamma_int       : {gamma_int:10.4f} eV/A^2 = {gamma_int * EV_A2_TO_J_M2:7.3f} J/m^2")
-    ood = relax_interface
+    if valid:
+        print(
+            f"gamma_surf Cu   : {gamma_sub:10.4f} eV/A^2 = {gamma_sub * EV_A2_TO_J_M2:7.3f} J/m^2"
+        )
+        print(
+            f"gamma_surf Ni   : {gamma_film:10.4f} eV/A^2 = {gamma_film * EV_A2_TO_J_M2:7.3f} J/m^2"
+        )
+        print(
+            f"gamma_int       : {gamma_int:10.4f} eV/A^2 = {gamma_int * EV_A2_TO_J_M2:7.3f} J/m^2"
+        )
+    else:
+        print("gamma_surf Cu   : NA (invalid energy chain)")
+        print("gamma_surf Ni   : NA (invalid energy chain)")
+        print("gamma_int       : NA (invalid energy chain)")
+        print("invalid reasons : " + "; ".join(errors))
     print(
-        f"OOD (interface) : score={ood.max_ood_score:.3f} step={ood.ood_step} "
-        f"triggered={ood.ood_triggered}"
+        f"OOD             : monitoring={row['ood_monitoring']} "
+        f"committee_enabled={committee_enabled} score={ood_result.max_ood_score:.3f} "
+        f"triggered={ood_triggered}"
     )
-    print(f"\nWrote {csv_path}, metadata.yaml and relaxed structures to {outdir}/")
+    print(f"\nWrote {csv_path}, metadata.yaml and structures to {outdir}/")
     if args.backend == "dummy":
         print("note: dummy energies are not physical; the numbers only prove the chain.")
-    return 0
+    return 0 if valid else 2
 
 
 if __name__ == "__main__":
