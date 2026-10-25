@@ -576,9 +576,20 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
         )
 
     if calculator is not None and references_ready:
-        relax_sub, relax_film, relax_interface, energies = _relax_ledger(
-            candidate, reference_sub, reference_film, calculator, args, outdir
-        )
+        try:
+            relax_sub, relax_film, relax_interface, energies = _relax_ledger(
+                candidate, reference_sub, reference_film, calculator, args, outdir
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Construction-time failures (bad calculator, missing weights)
+            # must not crash the driver: the ledger is written with an
+            # explicit reason instead of a bare traceback.
+            record_error("relaxation", exc)
+            message = f"{type(exc).__name__}: {exc}"
+            relax_sub = invalid_relax(reference_sub, message)
+            relax_film = invalid_relax(reference_film, message)
+            relax_interface = invalid_relax(candidate.atoms, message)
+            energies = (None, None, None)
     else:
         message = "relaxation skipped because calculator or reference construction failed"
         relax_sub = invalid_relax(reference_sub, message)

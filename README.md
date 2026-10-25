@@ -90,6 +90,10 @@ Surface/interface energies are emitted only when the pristine and coherent
 bulk reference energies are finite and both reference slabs plus the interface
 pass convergence, OOD, exception, and finite energy/force checks.
 
+Calculator construction failures (missing weights, unusable device) are
+recorded as an invalid result with an explicit reason; the driver never
+substitutes a stand-in calculator and never aborts on a bare traceback.
+
 ## Python API
 
 ```python

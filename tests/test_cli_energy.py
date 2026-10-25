@@ -415,6 +415,32 @@ def test_example_03_calculator_exception_invalidates_gamma(example03, tmp_path, 
     assert "weights unavailable" in row["invalid_reasons"]
 
 
+def test_example_03_relaxation_construction_failure_invalidates_gamma(example03, tmp_path):
+    """A construction-time calculator failure must not crash the driver.
+
+    ``GuardedRelaxer._wrap`` raises instead of falling back to a zero-force
+    dummy; the ledger has to record it as an invalid candidate rather than
+    aborting the whole run with a traceback.
+    """
+    from atominterface.relax import GuardedRelaxer
+
+    def broken_wrap(self, atoms):
+        raise RuntimeError("checkpoint unreadable")
+
+    original = GuardedRelaxer._wrap
+    GuardedRelaxer._wrap = broken_wrap
+    try:
+        code, row = _run_example_main(example03, tmp_path / "out")
+    finally:
+        GuardedRelaxer._wrap = original
+
+    assert code != 0
+    assert row["valid"] == "False"
+    assert row["interface_valid"] == "False"
+    assert row["gamma_eV_per_A2"] == ""
+    assert "checkpoint unreadable" in row["invalid_reasons"]
+
+
 @pytest.mark.parametrize("nonfinite", ["energy", "forces"])
 def test_example_03_nonfinite_calculator_invalidates_gamma(
     example03, tmp_path, monkeypatch, nonfinite
