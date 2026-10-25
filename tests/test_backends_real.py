@@ -12,7 +12,9 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from ase.build import bulk
@@ -124,6 +126,56 @@ def test_mace_running_calculator_identity():
     assert identity.startswith("MACE-MP-0/medium@mace-torch:")
     assert ":sha256:" in identity
     assert len(identity.rsplit(":", 1)[1]) == 12
+
+
+def test_mace_instantiate_reports_every_constructor_failure():
+    from atominterface.backends import mace_
+
+    class BrokenCalculator:
+        def __init__(self, **kwargs):
+            if "model_paths" in kwargs:
+                raise RuntimeError("device initialization failed")
+            raise ValueError("checkpoint rejected")
+
+    with pytest.raises(RuntimeError) as caught:
+        mace_._instantiate(
+            BrokenCalculator,
+            "cpu",
+            model_paths=["weights.model"],
+            model_path="weights.model",
+        )
+
+    message = str(caught.value)
+    assert "model_paths: RuntimeError: device initialization failed" in message
+    assert "model_path: ValueError: checkpoint rejected" in message
+    assert isinstance(caught.value.__cause__, ValueError)
+
+
+def test_mace_default_loader_reports_helper_and_manual_failures(monkeypatch):
+    from atominterface.backends import mace_
+
+    fake_mace = ModuleType("mace")
+    fake_mace.__path__ = []  # type: ignore[attr-defined]
+    fake_calculators = ModuleType("mace.calculators")
+
+    def broken_helper(**kwargs):
+        raise RuntimeError("helper cache is corrupt")
+
+    fake_calculators.mace_mp = broken_helper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mace", fake_mace)
+    monkeypatch.setitem(sys.modules, "mace.calculators", fake_calculators)
+
+    def broken_download():
+        raise OSError("manual download is offline")
+
+    monkeypatch.setattr(mace_, "_download_default_weights", broken_download)
+    with pytest.raises(RuntimeError) as caught:
+        mace_._load_default(object, "cpu")
+
+    message = str(caught.value)
+    assert "mace_mp helper: RuntimeError: helper cache is corrupt" in message
+    assert "manual checkpoint: OSError: manual download is offline" in message
+    assert isinstance(caught.value.__cause__, OSError)
 
 
 # ------------------------------------------------------------------
