@@ -133,7 +133,19 @@ def test_chgnet_cpu_small_cell():
     """Pretrained CHGNet on CPU: finite energy and non-trivial forces."""
     pytest.importorskip("chgnet")
 
-    from atominterface.backends import get_calculator
+    from atominterface.backends import autodiscover, backend_registry, get_calculator
+    from atominterface.backends.registry import discovery_failures
+
+    # ``importorskip`` only proves the *package* imports. The backend is
+    # registered by importing ``atominterface.backends.chgnet_``, which can
+    # fail independently -- and when it does the error used to be swallowed,
+    # so this test failed with a bare "unknown backend 'chgnet'" even though
+    # chgnet was installed. Skip on what is actually needed, and report why
+    # registration did not happen.
+    autodiscover()
+    if "chgnet" not in backend_registry.list():
+        reason = discovery_failures.get("chgnet_", "not registered")
+        pytest.skip(f"chgnet backend unavailable: {reason}")
 
     atoms = _copper_cell()
     atoms.calc = get_calculator("chgnet")(atoms)
