@@ -117,6 +117,12 @@ class CoherentInterfaceConfig(BuilderConfig):
         naming the Miller indices and the ``--symmetric`` option.  ``True``
         forces mirror-symmetric boards (same termination on both surfaces,
         cut at half the configured thickness).  ``False`` disables both.
+    area_policy : str, optional
+        Which side's area an interface energy is normalised by when the
+        two sides do **not** agree: ``"strict"`` (default) reports no
+        usable area at all, ``"substrate"`` or ``"film"`` commit to that
+        side.  A geometric mean of the two is never used -- it would make
+        a mismatch look handled instead of reported.
     """
 
     substrate_miller: tuple[int, int, int] = (0, 0, 1)
@@ -136,6 +142,7 @@ class CoherentInterfaceConfig(BuilderConfig):
     charge_tolerance: float = 1e-6
     dipole_tolerance: float = 1e-3
     symmetric_slabs: bool | str = "auto"
+    area_policy: str = "strict"
 
     def validate(self) -> list[str]:
         errors = super().validate()
@@ -157,6 +164,10 @@ class CoherentInterfaceConfig(BuilderConfig):
             errors.append("vacuum_thickness must be finite and non-negative")
         if not math.isfinite(self.gap) or self.gap < 0:
             errors.append("gap must be finite and non-negative")
+        if self.area_policy not in AREA_POLICIES:
+            errors.append(
+                f"area_policy must be one of {list(AREA_POLICIES)}, got {self.area_policy!r}"
+            )
         return errors
 
 
@@ -177,6 +188,12 @@ class _MatchInfo:
     shear_strain: float
     rotation: np.ndarray | None = None
     metadata: dict[str, object] = field(default_factory=dict)
+    # Matched in-plane supercell areas (Å²), *before* the film is strained
+    # onto the substrate.  They are what ``_area_ratio_ok`` already
+    # computes to bound the ratio; keeping them spares a second pass and
+    # records the pre-strain mismatch the strain then removes.
+    substrate_area: float = 0.0
+    film_area: float = 0.0
 
 
 def _lattice_area(lattice: np.ndarray) -> float:
@@ -184,6 +201,113 @@ def _lattice_area(lattice: np.ndarray) -> float:
     a = lattice[0]
     b = lattice[1]
     return float(np.linalg.norm(np.cross(a, b)))
+
+
+#: Accepted values of :attr:`CoherentInterfaceConfig.area_policy`.
+AREA_POLICIES: tuple[str, ...] = ("strict", "substrate", "film")
+
+
+@dataclass(frozen=True)
+class InterfaceAreas:
+    """The two sides' interface areas plus the one to normalise by.
+
+    ``area_substrate`` / ``area_film`` are the in-plane areas (Å²) each
+    side actually occupies -- the pair a "bilateral" energy ledger needs
+    in order to say which side a normalisation came from.  A coherent
+    stack shares one cell, so the pair is normally equal; it diverges as
+    soon as one side is left unstrained.
+
+    ``area_used`` is the single number a downstream energy division
+    should take, resolved from ``policy``:
+
+    ``"strict"``
+        Refuse to choose when the sides disagree: ``area_used`` is NaN
+        and ``note`` reports both numbers.
+    ``"substrate"`` / ``"film"``
+        Always take that side, disagreement or not.
+
+    A geometric mean ``sqrt(a_sub * a_film)`` is deliberately **not**
+    offered.  It would turn a real mismatch into a plausible-looking
+    number, i.e. hide exactly the thing this record exists to expose.
+    """
+
+    area_substrate: float
+    area_film: float
+    area_used: float
+    consistent: bool
+    policy: str
+    note: str
+
+
+def _in_plane_vectors(lattice) -> np.ndarray:
+    """First two lattice rows as 2x3 cartesian vectors.
+
+    Accepts a 3x3 or 2x3 matrix, a 2x2 in-plane slice (padded with a
+    zero z component) or anything exposing a pymatgen-style ``matrix``.
+    """
+    matrix = getattr(lattice, "matrix", lattice)
+    mat = np.asarray(matrix, dtype=np.float64)
+    if mat.shape == (2, 2):
+        padded = np.zeros((2, 3), dtype=np.float64)
+        padded[:, :2] = mat
+        return padded
+    return mat[:2, :]
+
+
+def interface_areas(
+    substrate_lattice,
+    film_lattice,
+    *,
+    tolerance: float = 1e-6,
+    policy: str = "strict",
+) -> InterfaceAreas:
+    """Resolve the interface area of a two-sided stack.
+
+    ``tolerance`` is a *relative* window on ``abs(a_sub - a_film)``
+    against the larger of the two, so the verdict is scale-free.
+    ``policy`` must be one of :data:`AREA_POLICIES`.
+
+    Nothing here raises on a mismatch: an inconsistent pair is a fact to
+    record, and deciding what to do with such a candidate belongs to the
+    caller.  Only an unknown ``policy`` raises, because it is a
+    programming error rather than a property of the structure.
+    """
+    if policy not in AREA_POLICIES:
+        raise ValueError(f"area_policy must be one of {list(AREA_POLICIES)}, got {policy!r}")
+
+    a_sub = _lattice_area(_in_plane_vectors(substrate_lattice))
+    a_film = _lattice_area(_in_plane_vectors(film_lattice))
+    scale = max(a_sub, a_film)
+    consistent = bool(abs(a_sub - a_film) <= tolerance * scale) if scale > 0 else True
+
+    if policy == "film":
+        area_used = a_film
+    elif policy == "substrate" or consistent:
+        area_used = a_sub
+    else:
+        area_used = float("nan")
+
+    if consistent:
+        note = f"both sides {a_sub:.6g} Å²; area taken from the {policy} policy"
+    elif policy == "strict":
+        note = (
+            f"area mismatch: substrate {a_sub:.6g} Å² vs film {a_film:.6g} Å²; "
+            "no single area is valid and no average is substituted"
+        )
+    else:
+        note = (
+            f"area mismatch: substrate {a_sub:.6g} Å² vs film {a_film:.6g} Å²; "
+            f"area taken from the {policy} side by policy"
+        )
+
+    return InterfaceAreas(
+        area_substrate=a_sub,
+        area_film=a_film,
+        area_used=area_used,
+        consistent=consistent,
+        policy=policy,
+        note=note,
+    )
 
 
 def _as_pymatgen_lattice(obj):
@@ -477,6 +601,8 @@ def _match_lattices(
                     shear_strain=shear,
                     rotation=rotation,
                     metadata={"zsl": True},
+                    substrate_area=abs(float(np.linalg.det(sub_t))) * sub_cell_area,
+                    film_area=abs(float(np.linalg.det(film_t))) * film_cell_area,
                 )
             )
     except Exception:  # noqa: BLE001
@@ -548,6 +674,7 @@ def _fallback_matches(
     film_vecs = np.array(film_lat.matrix[:2], dtype=np.float64)
 
     film_area = float(abs(np.linalg.det(film_vecs[:, :2])))
+    sub_cell_area = float(abs(np.linalg.det(sub_vecs[:, :2])))
     if film_area <= 0:
         return []
 
@@ -571,6 +698,8 @@ def _fallback_matches(
                     strain=strain,
                     shear_strain=shear,
                     metadata={"zsl": False, "fallback": True},
+                    substrate_area=sub_cell_area,
+                    film_area=area,
                 )
             )
     return matches
@@ -729,6 +858,9 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
     )
     if coherent:
         film_slab = _strain_film_onto(film_slab, sub_2d)
+    # In-plane cell the film ends up with: the substrate cell once it has
+    # been strained onto it, its own cell in the legacy no-match stacking.
+    film_in_plane = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
     film_coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
 
     # Rebuild both cells with a clean z axis so the vacuum budget is exact.
@@ -768,6 +900,15 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         site_properties=site_properties,
     )
     _attach_charge_geometry(interface, substrate_slab, film_slab, vacuum)
+    # Which in-plane cell each side actually occupies in the stack.  The
+    # substrate is the reference and is never deformed; the film either
+    # inherits that cell or, when nothing was strained, keeps its own --
+    # the case where the two sides stop agreeing and the area policy has
+    # to say which one the energy was normalised by.
+    interface.properties["side_in_plane_cells"] = {
+        "substrate": sub_2d.tolist(),
+        "film": film_in_plane.tolist(),
+    }
     return interface
 
 
@@ -868,6 +1009,19 @@ def _to_candidate(
     lattice = np.asarray(interface.lattice.matrix, dtype=np.float64)
     area = _lattice_area(lattice)
 
+    # Bilateral area.  ``area`` above is the stack's own cell, which is
+    # what the rest of the pipeline keeps normalising by; this resolves
+    # the two sides separately and records whether they agree.  An
+    # unstrained film (legacy stacking) is a legitimate geometry, so a
+    # mismatch is recorded, never raised.
+    side_cells = (getattr(interface, "properties", None) or {}).get("side_in_plane_cells")
+    if isinstance(side_cells, dict) and "substrate" in side_cells and "film" in side_cells:
+        substrate_lattice = np.asarray(side_cells["substrate"], dtype=np.float64)
+        film_lattice = np.asarray(side_cells["film"], dtype=np.float64)
+    else:
+        substrate_lattice = film_lattice = lattice[:2, :]
+    areas = interface_areas(substrate_lattice, film_lattice, policy=config.area_policy)
+
     # Energy placeholders; real values are filled by the relax layer.
     energy = float("nan")
     if hasattr(interface, "energy") and interface.energy is not None:
@@ -892,6 +1046,14 @@ def _to_candidate(
         "substrate_supercell_multiplicity": _multiplicity(match.substrate_supercell),
         "film_supercell_multiplicity": _multiplicity(match.film_supercell),
         "match_area_ang2": match.match_area,
+        "match_substrate_area_ang2": match.substrate_area,
+        "match_film_area_ang2": match.film_area,
+        "area_substrate": areas.area_substrate,
+        "area_film": areas.area_film,
+        "area_used": areas.area_used,
+        "area_consistent": areas.consistent,
+        "area_policy": areas.policy,
+        "area_note": areas.note,
         "mismatch_stretch": match.strain,
         "mismatch_shear": match.shear_strain,
         "mismatch": max(match.strain, match.shear_strain),
@@ -965,6 +1127,10 @@ def _to_candidate(
         n_substrate=n_substrate,
         n_film=n_film,
         metadata=metadata,
+        area_substrate=areas.area_substrate,
+        area_film=areas.area_film,
+        area_consistent=areas.consistent,
+        area_policy=areas.policy,
     )
 
 
