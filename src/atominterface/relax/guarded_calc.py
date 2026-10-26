@@ -29,9 +29,14 @@ class RelaxResult:
     atoms: Atoms
     n_steps: int = 0
     converged: bool = False
+    valid: bool = False
     ood_triggered: bool = False
     ood_step: int = -1
     max_ood_score: float = 0.0
+    final_energy: float | None = None
+    energies_finite: bool = False
+    forces_finite: bool = False
+    exception: str | None = None
     reasons: list[str] = field(default_factory=list)
     quarantine_path: str = ""
     metadata: dict = field(default_factory=dict)
@@ -104,12 +109,78 @@ class GuardedRelaxer:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def run(self, atoms) -> RelaxResult:  # noqa: D401, F821
+    def run(self, atoms) -> RelaxResult:  # noqa: D401, F821, PLR0915
         atoms = atoms.copy()
-        atoms.calc = self._wrap(atoms)
-        result = RelaxResult(atoms=atoms)
+        committee_enabled = any(
+            isinstance(watcher, CommitteeWatcher) and bool(watcher.calculators)
+            for watcher in self.watchers
+        )
+        result = RelaxResult(
+            atoms=atoms,
+            metadata={
+                "committee_enabled": committee_enabled,
+                "ood_monitoring": "committee+heuristics"
+                if committee_enabled
+                else "heuristics_only",
+            },
+        )
+
+        # Every committee state observed across all guard evaluations,
+        # resolved worst-first at the end of the run.  A state that never
+        # appears (no CommitteeWatcher in the chain) is a legitimate
+        # "not configured", distinct from "unavailable" (asked for and
+        # every member failed).
+        committee_states: list[str] = []
+
+        def evaluate_state() -> np.ndarray | None:
+            forces = np.asarray(atoms.get_forces(), dtype=float)
+            energy = float(atoms.get_potential_energy())
+            result.forces_finite = bool(np.all(np.isfinite(forces)))
+            result.energies_finite = bool(np.isfinite(energy))
+            result.final_energy = energy if result.energies_finite else None
+            if not result.energies_finite:
+                result.reasons.append("non_finite_energy")
+            if not result.forces_finite:
+                result.reasons.append("non_finite_forces")
+            if not result.energies_finite or not result.forces_finite:
+                return None
+            return forces
+
+        def check_watch(forces: np.ndarray, step: int) -> bool:
+            watch = self._aggregate(atoms, forces)
+            state = watch.meta.get("committee_state")
+            if state is not None:
+                committee_states.append(str(state))
+            if not np.isfinite(watch.score):
+                result.reasons.append("non_finite_ood_score")
+                return False
+            result.max_ood_score = max(result.max_ood_score, float(watch.score))
+            if watch.score < self.ood_threshold:
+                return True
+            result.ood_triggered = True
+            result.ood_step = step
+            result.reasons.append(watch.reason)
+            if watch.per_atom is None or len(watch.per_atom) != len(atoms):
+                # The winning watcher carries no per-atom signal: the
+                # cluster falls back to atom 0 and the run says so,
+                # instead of silently quarantining the wrong site.
+                result.metadata["quarantine_center_degraded"] = True
+            rec = QuarantineRecord(
+                run_id=os.environ.get("ATOMINTERFACE_RUN_ID", "local"),
+                step=step,
+                center_index=self._worst_atom(watch, atoms),
+                ood_score=float(watch.score),
+                reasons=[watch.reason] if watch.reason else [],
+            )
+            cluster = cut_cluster(atoms, rec.center_index, record=rec)
+            rec.dft_input_path = str(
+                write_dft_input(cluster, rec, self.quarantine_dir, self.dft_fmt)
+            )
+            result.quarantine_path = rec.dft_input_path
+            return False
 
         try:
+            atoms.calc = self._wrap(atoms)
             opt = self._make_optimizer(atoms)
             # ``max_steps`` is a *total* optimizer-step budget shared by
             # every guard iteration, not a per-iteration cap.  ASE's
@@ -121,32 +192,31 @@ class GuardedRelaxer:
             budget = self.max_steps
             for step in range(self.max_steps):
                 result.n_steps = step + 1
-                forces = atoms.get_forces()
-                watch = self._aggregate(atoms, forces)
-                if watch.score >= self.ood_threshold:
-                    result.ood_triggered = True
-                    result.ood_step = step
-                    result.max_ood_score = float(watch.score)
-                    result.reasons.append(watch.reason)
-                    rec = QuarantineRecord(
-                        run_id=os.environ.get("ATOMINTERFACE_RUN_ID", "local"),
-                        step=step,
-                        center_index=self._worst_atom(watch, atoms),
-                        ood_score=float(watch.score),
-                        reasons=[watch.reason] if watch.reason else [],
-                    )
-                    cluster = cut_cluster(atoms, rec.center_index)
-                    rec.dft_input_path = str(
-                        write_dft_input(cluster, rec, self.quarantine_dir, self.dft_fmt)
-                    )
-                    result.quarantine_path = rec.dft_input_path
+                forces = evaluate_state()
+                if forces is None or not check_watch(forces, step):
                     break
                 done_before = opt.get_number_of_steps()
-                opt.run(fmax=self.fmax, steps=budget)
-                # ASE accumulates its own budget across run() calls
+                # Walk the optimizer one step at a time: ``irun`` yields
+                # once before the first step and after every optimizer
+                # step, so the guard sees every intermediate geometry.
+                # Sampling only at guard-iteration boundaries let a
+                # transient excursion inside a single ``opt.run`` call
+                # pass unnoticed whenever the final forces were benign
+                # again.
+                stopped = False
+                for converged in opt.irun(fmax=self.fmax, steps=budget):
+                    forces = evaluate_state()
+                    if forces is None or not check_watch(forces, step):
+                        stopped = True
+                        break
+                    if converged:
+                        break
+                # ASE accumulates its own budget across irun() calls
                 # (self.max_steps = self.nsteps + steps), so the delta is
                 # exactly what this call spent.
                 budget -= opt.get_number_of_steps() - done_before
+                if stopped:
+                    break
                 if opt.converged():
                     result.converged = True
                     break
@@ -161,43 +231,76 @@ class GuardedRelaxer:
                     )
                     break
         except Exception as exc:  # noqa: BLE001
+            result.exception = f"{type(exc).__name__}: {exc}"
             result.reasons.append(f"relax_exception={exc!r}")
+        self._record_committee_state(result, committee_states)
+        result.valid = (
+            result.converged
+            and not result.ood_triggered
+            and result.exception is None
+            and result.energies_finite
+            and result.forces_finite
+            and result.final_energy is not None
+        )
         result.atoms = atoms
         return result
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
-    def _wrap(self, atoms):  # noqa: D401
-        """Wrap calculator to add guards and type conversion."""
-        import numpy as np
+    @staticmethod
+    def _record_committee_state(result: RelaxResult, states: list[str]) -> None:  # noqa: D401
+        """Resolve the worst committee state observed, worst-first.
 
+        A committee that was asked for but produced no usable member is
+        a monitoring outage, not a consensus: the score of an
+        ``unavailable`` committee is 0.0 and must never be readable as
+        "the models agree".  The outage invalidates the certification,
+        not the energy, so the run stays valid and the state is carried
+        in the metadata and the reasons.  A state that never appeared
+        (no CommitteeWatcher in the chain) is a legitimate "not
+        configured", distinct from "unavailable".
+        """
+        if "unavailable" in states:
+            result.metadata["committee_state"] = "unavailable"
+            result.metadata["ood_monitoring"] = "committee_unavailable"
+            result.reasons.append("committee_unavailable")
+        elif "degraded" in states:
+            result.metadata["committee_state"] = "degraded"
+            result.metadata["ood_monitoring"] = "committee_degraded"
+        elif "ok" in states:
+            result.metadata["committee_state"] = "ok"
+        elif "disabled" in states:
+            result.metadata["committee_state"] = "disabled"
+        else:
+            result.metadata["committee_state"] = "not_configured"
+
+    def _wrap(self, atoms):  # noqa: D401
+        """Resolve a calculator instance without fabricating results."""
         base = self._base
 
-        # Case 1: base is already a calculator instance
-        if hasattr(base, "get_forces") and callable(base.get_forces):
+        if not isinstance(base, type) and hasattr(base, "get_forces") and callable(base.get_forces):
             calc = base
-        # Case 2: base is a class
-        elif isinstance(base, type) or callable(base):
+        elif callable(base):
             try:
                 calc = base(atoms)
-            except TypeError:
-                calc = base()
-        # Case 4: base is a string or other
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"calculator factory failed for the supplied atoms: {type(exc).__name__}: {exc}"
+                ) from exc
         else:
+            raise TypeError(
+                "calculator must be an ASE-compatible instance or a callable factory; "
+                f"got {type(base).__name__}"
+            )
 
-            class _DummyCalc:
-                def __init__(self, a):
-                    self.atoms = a
-
-                def get_forces(self, a=None):
-                    return np.zeros((len(self.atoms), 3))
-
-                def get_potential_energy(self, a=None):
-                    return 0.0
-
-            calc = _DummyCalc(atoms)
-
+        if not callable(getattr(calc, "get_forces", None)) or not callable(
+            getattr(calc, "get_potential_energy", None)
+        ):
+            raise TypeError(
+                "calculator factory returned an object without get_forces() and "
+                "get_potential_energy()"
+            )
         atoms.calc = calc
         return calc
 
@@ -219,13 +322,49 @@ class GuardedRelaxer:
         # so any empty-reason watcher ahead of the argmax shifted the
         # index (and an all-empty prefix raised IndexError, aborting
         # the relaxation as relax_exception).
+        #
+        # ``per_atom`` and ``meta`` are forwarded from the winning
+        # watcher.  The previous rebuild dropped both, which anchored
+        # every quarantine cluster on atom 0 (no localisation signal)
+        # and made a committee outage indistinguishable from agreement
+        # (no state in the metadata).
         results = [w(atoms, forces) for w in self.watchers]
         scores = [r.score for r in results]
         if self.stop_on == "any":
             idx = int(np.argmax(scores))
-            return WatchResult(score=float(scores[idx]), reason=results[idx].reason)
+            best = results[idx]
+            # The winner's keys take precedence, but every watcher's meta
+            # is merged in: committee state is a property of the committee
+            # watcher, not of whoever wins the argmax, and an outage
+            # scores 0.0 -- it would never win and never surface if only
+            # the winner were forwarded.
+            meta = dict(best.meta)
+            for res in results:
+                for key, value in res.meta.items():
+                    meta.setdefault(key, value)
+            return WatchResult(
+                score=float(scores[idx]),
+                reason=best.reason,
+                per_atom=best.per_atom,
+                meta=meta,
+            )
         score = float(np.mean(scores))
-        return WatchResult(score=score, reason="; ".join(r.reason for r in results if r.reason))
+        # No single winner in mean mode: merge the metas and keep the
+        # strongest per-atom signal on offer.
+        merged: dict = {}
+        for res in results:
+            merged.update(res.meta)
+        best_signal = max(
+            (r for r in results if r.per_atom is not None),
+            key=lambda r: r.score,
+            default=None,
+        )
+        return WatchResult(
+            score=score,
+            reason="; ".join(r.reason for r in results if r.reason),
+            per_atom=best_signal.per_atom if best_signal is not None else None,
+            meta=merged,
+        )
 
     @staticmethod
     def _worst_atom(watch: WatchResult, atoms) -> int:  # noqa: D401

@@ -68,6 +68,32 @@ If every candidate is rejected, the command reports the closest lattice
 matches it found and the `--max-strain` value that would keep them,
 instead of just exiting empty.
 
+With `build --relax`, each CSV/JSON row includes `valid`, `converged`,
+finite-energy/force checks, structured calculator errors,
+`committee_enabled`, and `ood_monitoring`. Any invalid relaxation is still
+written for diagnosis, but the command exits non-zero. A score of zero with
+`committee_enabled=false` means only geometry/force heuristics ran; it is not
+proof that the structure is in-distribution.
+
+The complete Cu/Ni energy ledger is also fail-closed:
+
+```bash
+# Wiring-only success path (dummy energies are not physical).
+python examples/03_interface_energy.py --backend dummy --fmax 0.05
+
+# Deliberate failure: candidates.csv is retained, gamma cells are empty,
+# valid=False, and the process exits non-zero.
+python examples/03_interface_energy.py --backend dummy --max-steps 1 --fmax 1e-6
+```
+
+Surface/interface energies are emitted only when the pristine and coherent
+bulk reference energies are finite and both reference slabs plus the interface
+pass convergence, OOD, exception, and finite energy/force checks.
+
+Calculator construction failures (missing weights, unusable device) are
+recorded as an invalid result with an explicit reason; the driver never
+substitutes a stand-in calculator and never aborts on a bare traceback.
+
 ## Python API
 
 ```python
@@ -92,6 +118,10 @@ result = relaxer.run(candidates[0].to_atoms())
 
 if result.ood_triggered:
     print("OOD at step", result.ood_step, "->", result.quarantine_path)
+elif not result.valid:
+    print("invalid energy result:", result.exception or result.reasons)
+else:
+    print("finite converged energy:", result.final_energy)
 ```
 
 ## Architecture
@@ -131,9 +161,14 @@ if result.ood_triggered:
 ```
 
 The key design choice: **the guard is not something you opt into**.
-Every `GuardedRelaxer.run()` monitors OOD signals; when a local atomic
-environment leaves the model's training distribution it pauses, cuts
-out the offending cluster, and writes a DFT single-point input.
+Every `GuardedRelaxer.run()` checks finite energies and forces and runs its
+configured watchers. A result is `valid` only after finite evaluation and
+convergence without OOD or calculator exceptions. Committee-based
+distributional monitoring remains optional and is reported explicitly; the
+default geometry/force heuristics must not be interpreted as an
+in-distribution certificate. When a watched local atomic environment crosses
+the OOD threshold, the guard pauses, cuts out the offending cluster, and
+writes a DFT single-point input.
 
 ## Testing
 

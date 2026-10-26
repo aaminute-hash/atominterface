@@ -60,9 +60,20 @@ _CSV_FIELDS = (
     "area",
     "n_atoms",
 )
-#: OOD bookkeeping columns, appended after the charge summary so the
-#: historical column order stays untouched.
-_OOD_FIELDS = ("ood_score", "ood_step")
+#: Relaxation validity and OOD bookkeeping columns, appended after the
+#: charge summary so the historical column order stays untouched.
+_RELAX_FIELDS = (
+    "valid",
+    "converged",
+    "energies_finite",
+    "forces_finite",
+    "exception",
+    "committee_enabled",
+    "ood_monitoring",
+    "ood_score",
+    "ood_step",
+    "ood_triggered",
+)
 
 
 def _load_structure(path: Path):
@@ -262,15 +273,21 @@ def _report_no_candidates(instance, max_strain: float, max_area: float) -> None:
 
 
 def _ood_columns(result: Any) -> dict[str, str]:
-    """``ood_score`` / ``ood_step`` cells for one relaxed candidate.
-
-    Without a relaxation there is nothing to report, so both cells stay
-    empty; a relaxed candidate carries its peak OOD score and the step
-    that first crossed the threshold (-1 when it never did).
-    """
+    """Relaxation-validity and OOD cells for one candidate."""
     if result is None:
-        return dict.fromkeys(_OOD_FIELDS, "")
-    return {"ood_score": f"{result.max_ood_score:.6f}", "ood_step": str(result.ood_step)}
+        return dict.fromkeys(_RELAX_FIELDS, "")
+    return {
+        "valid": str(result.valid),
+        "converged": str(result.converged),
+        "energies_finite": str(result.energies_finite),
+        "forces_finite": str(result.forces_finite),
+        "exception": result.exception or "",
+        "committee_enabled": str(bool(result.metadata.get("committee_enabled", False))),
+        "ood_monitoring": str(result.metadata.get("ood_monitoring", "unknown")),
+        "ood_score": f"{result.max_ood_score:.6f}",
+        "ood_step": str(result.ood_step),
+        "ood_triggered": str(result.ood_triggered),
+    }
 
 
 def _relax_candidates(
@@ -315,19 +332,28 @@ def _relax_candidates(
             "backend": backend,
             "device": device,
             "n_steps": result.n_steps,
+            "valid": result.valid,
             "converged": result.converged,
+            "energies_finite": result.energies_finite,
+            "forces_finite": result.forces_finite,
+            "final_energy": result.final_energy,
+            "exception": result.exception,
+            "committee_enabled": bool(result.metadata.get("committee_enabled", False)),
+            "ood_monitoring": result.metadata.get("ood_monitoring", "unknown"),
             "ood_triggered": result.ood_triggered,
             "ood_step": result.ood_step,
             "max_ood_score": result.max_ood_score,
             "reasons": result.reasons,
         }
         results[rank] = result
-        if result.converged:
-            status = "converged"
+        if result.valid:
+            status = "valid/converged"
         elif result.ood_triggered:
-            status = "OOD-stopped"
+            status = "invalid (OOD-stopped)"
+        elif result.exception is not None:
+            status = "invalid (calculator exception)"
         else:
-            status = "step limit"
+            status = "invalid (not converged)"
         typer.echo(
             f"  candidate {rank:02d}: {status}, cycles={result.n_steps}, "
             f"max_ood={result.max_ood_score:.4f}, ood_step={result.ood_step}"
@@ -395,7 +421,7 @@ def _write_outputs(
     csv_path = outdir / "candidates.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
-            handle, fieldnames=[*_CSV_FIELDS, *charge_summary(None), *_OOD_FIELDS]
+            handle, fieldnames=[*_CSV_FIELDS, *charge_summary(None), *_RELAX_FIELDS]
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -570,6 +596,14 @@ def build(
     typer.echo(
         f"\nWrote {len(candidates)} structure file(s), {csv_path} and JSON reports to {outdir}/"
     )
+    invalid = [rank for rank, result in (relax_results or {}).items() if not result.valid]
+    if invalid:
+        typer.echo(
+            "relaxation failed validity checks for candidate(s): "
+            + ", ".join(str(rank) for rank in invalid),
+            err=True,
+        )
+        raise typer.Exit(code=2)
 
 
 if __name__ == "__main__":

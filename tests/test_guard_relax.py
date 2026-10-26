@@ -228,7 +228,7 @@ class _CalcWith:
     def __init__(self, forces: np.ndarray):
         self._forces = np.asarray(forces, dtype=float)
 
-    def get_potential_energy(self, atoms):
+    def get_potential_energy(self, atoms, force_consistent=False):
         return 0.0
 
     def get_forces(self, atoms):
@@ -400,6 +400,8 @@ def test_guarded_relaxer_quarantines_on_committee_disagreement(tmp_path):
     )
     result = relaxer.run(atoms)
     assert result.ood_triggered is True
+    assert result.metadata["committee_enabled"] is True
+    assert result.metadata["ood_monitoring"] == "committee+heuristics"
     assert result.ood_step >= 0
     assert any("committee_disagreement" in reason for reason in result.reasons)
     assert result.quarantine_path != ""
@@ -532,3 +534,129 @@ def test_guarded_relaxer_committee_argmax_on_any_stop_on(tmp_path):
     assert result.reasons == ["committee_disagreement"]
     assert result.quarantine_path != ""
     assert list(tmp_path.iterdir())
+
+
+# ------------------------------------------------------------------
+# Energy-result validity contract
+# ------------------------------------------------------------------
+def test_guarded_relaxer_marks_only_converged_finite_result_valid():
+    atoms = make_atoms(5)
+    result = GuardedRelaxer(calculator=_CalcWith(np.zeros((5, 3))), max_steps=2, fmax=0.01).run(
+        atoms
+    )
+
+    assert result.valid is True
+    assert result.converged is True
+    assert result.final_energy == pytest.approx(0.0)
+    assert result.energies_finite is True
+    assert result.forces_finite is True
+    assert result.exception is None
+    assert result.metadata["committee_enabled"] is False
+    assert result.metadata["ood_monitoring"] == "heuristics_only"
+
+
+def test_guarded_relaxer_step_exhaustion_is_invalid():
+    atoms = make_atoms(5)
+    result = GuardedRelaxer(
+        calculator=_CalcWith(np.ones((5, 3)) * 0.02),
+        max_steps=1,
+        fmax=1e-6,
+        ood_threshold=0.99,
+    ).run(atoms)
+
+    assert result.valid is False
+    assert result.converged is False
+    assert result.final_energy == pytest.approx(0.0)
+    assert result.energies_finite is True
+    assert result.forces_finite is True
+    assert any(reason.startswith("step_budget_exhausted") for reason in result.reasons)
+
+
+@pytest.mark.parametrize("bad_value, expected_reason", [(float("nan"), "non_finite_energy")])
+def test_guarded_relaxer_rejects_nonfinite_energy(bad_value, expected_reason):
+    class _NonFiniteEnergy(_CalcWith):
+        def get_potential_energy(self, atoms):
+            return bad_value
+
+    result = GuardedRelaxer(calculator=_NonFiniteEnergy(np.zeros((5, 3))), max_steps=2).run(
+        make_atoms(5)
+    )
+
+    assert result.valid is False
+    assert result.final_energy is None
+    assert result.energies_finite is False
+    assert expected_reason in result.reasons
+
+
+def test_guarded_relaxer_rejects_nonfinite_forces():
+    forces = np.zeros((5, 3))
+    forces[0, 0] = np.inf
+    result = GuardedRelaxer(calculator=_CalcWith(forces), max_steps=2).run(make_atoms(5))
+
+    assert result.valid is False
+    assert result.forces_finite is False
+    assert "non_finite_forces" in result.reasons
+
+
+def test_guarded_relaxer_records_calculator_exception_structurally():
+    result = GuardedRelaxer(calculator=_BrokenCalc(), max_steps=2).run(make_atoms(5))
+
+    assert result.valid is False
+    assert result.exception == "RuntimeError: model exploded"
+    assert any(reason.startswith("relax_exception=") for reason in result.reasons)
+
+
+def test_guarded_relaxer_rejects_non_calculator_instead_of_using_zero_force_dummy():
+    result = GuardedRelaxer(calculator="not-a-calculator", max_steps=2).run(make_atoms(5))
+
+    assert result.valid is False
+    assert result.exception is not None
+    assert "calculator must be" in result.exception
+    assert result.final_energy is None
+
+
+def test_guarded_relaxer_preserves_factory_failure_reason():
+    def broken_factory(atoms):
+        raise TypeError("missing model weights")
+
+    result = GuardedRelaxer(calculator=broken_factory, max_steps=2).run(make_atoms(5))
+
+    assert result.valid is False
+    assert result.exception is not None
+    assert "TypeError: missing model weights" in result.exception
+
+
+def test_guarded_relaxer_ood_result_is_invalid(tmp_path):
+    result = GuardedRelaxer(
+        calculator=_CalcWith(np.zeros((5, 3))),
+        watchers=[lambda atoms, forces: WatchResult(score=1.0, reason="forced_ood")],
+        max_steps=2,
+        quarantine_dir=tmp_path,
+    ).run(make_atoms(5))
+
+    assert result.ood_triggered is True
+    assert result.valid is False
+    assert result.energies_finite is True
+    assert result.forces_finite is True
+
+
+def test_guarded_relaxer_rechecks_ood_after_optimizer(tmp_path):
+    calls = 0
+
+    def final_state_ood(atoms, forces):
+        nonlocal calls
+        calls += 1
+        return WatchResult(score=float(calls > 1), reason="final_state_ood" if calls > 1 else "")
+
+    result = GuardedRelaxer(
+        calculator=_CalcWith(np.zeros((5, 3))),
+        watchers=[final_state_ood],
+        max_steps=2,
+        quarantine_dir=tmp_path,
+    ).run(make_atoms(5))
+
+    assert calls == 2
+    assert result.ood_triggered is True
+    assert result.converged is False
+    assert result.valid is False
+    assert result.reasons == ["final_state_ood"]
