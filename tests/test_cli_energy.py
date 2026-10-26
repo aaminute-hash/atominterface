@@ -38,6 +38,10 @@ def example03():
     spec = importlib.util.spec_from_file_location("atominterface_example03_test", EXAMPLE03)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # Registered before exec_module (the stdlib importlib recipe): the
+    # module-level dataclasses in the example resolve their annotations
+    # through sys.modules, and without this they raise AttributeError.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -45,6 +49,11 @@ def example03():
 def _csv_row(outdir: Path) -> dict[str, str]:
     with (outdir / "candidates.csv").open(newline="", encoding="utf-8") as handle:
         return dict(next(csv.DictReader(handle)))
+
+
+def _csv_rows(outdir: Path) -> list[dict[str, str]]:
+    with (outdir / "candidates.csv").open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
 
 
 def _run_example_main(example03, outdir: Path, *extra: str) -> tuple[int, dict[str, str]]:
@@ -278,10 +287,12 @@ def test_example_03_dummy_end_to_end(tmp_path):
     assert "candidates.csv" in metadata["artifacts"]
     assert len(metadata["artifacts"]["candidates.csv"]) == 64  # full sha256 hex
 
+    # Relaxed structures are rank-prefixed so a multi-candidate ledger
+    # cannot overwrite itself; the bulk single points are shared.
     for name in (
-        "interface_relaxed.extxyz",
-        "slab_sub_relaxed.extxyz",
-        "slab_film_relaxed.extxyz",
+        "01_interface_relaxed.extxyz",
+        "01_slab_sub_relaxed.extxyz",
+        "01_slab_film_relaxed.extxyz",
         "bulk_sub.extxyz",
         "bulk_film.extxyz",
     ):
@@ -479,3 +490,163 @@ def test_example_03_nonfinite_calculator_invalidates_gamma(
     assert row["energies_finite"] == "False"
     assert row["gamma_eV_per_A2"] == ""
     assert "not finite" in row["invalid_reasons"] or "non_finite" in row["invalid_reasons"]
+
+
+# ------------------------------------------------------------------
+# multi-candidate ledger: every candidate gets a row, judged on its own
+# ------------------------------------------------------------------
+def _run_multi(example03, outdir: Path, *extra: str) -> int:
+    return example03.main(
+        [
+            "--backend",
+            "dummy",
+            "--fmax",
+            "0.05",
+            "--max-candidates",
+            "3",
+            "--outdir",
+            str(outdir),
+            *extra,
+        ]
+    )
+
+
+def test_example_03_ledgers_every_candidate(example03, tmp_path):
+    """--max-candidates N yields N ledger rows, not just the first one."""
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    code = _run_multi(example03, outdir)
+
+    rows = _csv_rows(outdir)
+    assert code == 0
+    assert len(rows) == 3
+    assert [row["rank"] for row in rows] == ["1", "2", "3"]
+    assert len({row["interface_id"] for row in rows}) == 3
+    assert all(row["status"] == "ok" for row in rows)
+    assert all(row["valid"] == "True" for row in rows)
+    assert all(row["gamma_eV_per_A2"] != "" for row in rows)
+
+
+def test_example_03_ledger_row_carries_the_full_diagnostics(example03, tmp_path):
+    """The row covers id, energies, area, reference, convergence, OOD, gamma."""
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    _run_multi(example03, outdir)
+    row = _csv_rows(outdir)[0]
+
+    for column in (
+        "rank",
+        "interface_id",
+        "E_slab_sub_ev",
+        "E_slab_film_ev",
+        "E_interface_ev",
+        "area_A2",
+        "area_source",
+        "area_sub_A2",
+        "area_film_A2",
+        "area_consistent",
+        "n_layers_sub",
+        "n_layers_film",
+        "vacuum_A",
+        "min_thickness_A",
+        "reference_state",
+        "converged",
+        "status",
+        "error_reason",
+        "ood_score",
+        "gamma_eV_per_A2",
+        "gamma_J_per_m2",
+    ):
+        assert column in row, column
+    assert row["reference_state"] == "strained-coherent"
+    assert int(row["n_layers_sub"]) > 0 and int(row["n_layers_film"]) > 0
+
+
+def test_example_03_middle_candidate_failure_keeps_the_others(example03, tmp_path, monkeypatch):
+    """A candidate that fails mid-list is recorded, not silently dropped.
+
+    ``_relax_ledger`` relaxes substrate, film and interface in that order,
+    so candidate ``n`` owns calls ``3n-2 .. 3n``; failing 4..6 kills the
+    middle candidate only.
+    """
+    pytest.importorskip("pymatgen")
+    original = example03._guarded_relax
+    calls = 0
+
+    def fail_second_candidate(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        result = original(*args, **kwargs)
+        if 4 <= calls <= 6:
+            result.valid = False
+            result.converged = False
+            result.exception = "RuntimeError: injected failure"
+            result.reasons = ["injected failure"]
+        return result
+
+    monkeypatch.setattr(example03, "_guarded_relax", fail_second_candidate)
+    outdir = tmp_path / "out"
+    code = _run_multi(example03, outdir)
+
+    rows = _csv_rows(outdir)
+    assert code == 2
+    assert len(rows) == 3
+    assert [row["status"] for row in rows] == ["ok", "failed", "ok"]
+
+    failed = rows[1]
+    assert failed["valid"] == "False"
+    assert failed["gamma_eV_per_A2"] == ""
+    assert failed["gamma_J_per_m2"] == ""
+    assert failed["gamma_surf_sub_eV_A2"] == ""
+    assert failed["gamma_surf_film_eV_A2"] == ""
+    assert failed["error_reason"] != ""
+    assert "injected failure" in failed["error_reason"]
+    # The successful candidates still ship their numbers.
+    assert rows[0]["gamma_eV_per_A2"] != ""
+    assert rows[2]["gamma_eV_per_A2"] != ""
+    assert rows[0]["gamma_J_per_m2"] != ""
+    assert rows[2]["gamma_J_per_m2"] != ""
+
+
+def test_example_03_all_candidates_ok_exits_zero(example03, tmp_path):
+    """Clean multi-candidate ledger: exit 0 (the failure case is above)."""
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    code = _run_multi(example03, outdir)
+    rows = _csv_rows(outdir)
+
+    assert code == 0
+    assert all(row["status"] == "ok" for row in rows)
+    assert all(row["error_reason"] == "" for row in rows)
+
+
+def test_example_03_multi_candidate_structures_do_not_overwrite(example03, tmp_path):
+    """Rank-prefixed extxyz names: three candidates, three distinct files."""
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    assert _run_multi(example03, outdir) == 0
+
+    for rank in (1, 2, 3):
+        for name in ("interface_relaxed", "slab_sub_relaxed", "slab_film_relaxed"):
+            assert (outdir / f"{rank:02d}_{name}.extxyz").is_file(), f"{rank:02d}_{name}"
+    assert (outdir / "bulk_sub.extxyz").is_file()
+    assert (outdir / "bulk_film.extxyz").is_file()
+
+    payloads = [
+        (outdir / f"{rank:02d}_interface_relaxed.extxyz").read_bytes() for rank in (1, 2, 3)
+    ]
+    assert len(set(payloads)) == 3
+
+
+def test_example_03_single_candidate_default_is_unchanged(example03, tmp_path):
+    """--max-candidates stays 1 by default: one row, rank 1, exit 0."""
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    code = example03.main(["--backend", "dummy", "--fmax", "0.05", "--outdir", str(outdir)])
+    rows = _csv_rows(outdir)
+
+    assert code == 0
+    assert len(rows) == 1
+    assert rows[0]["rank"] == "1"
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["gamma_eV_per_A2"] != ""
