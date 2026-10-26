@@ -262,6 +262,64 @@ def test_build_rejects_invalid_charge_policy(fake_build):
     assert fake_build.loads == []
 
 
+def test_build_wires_thickness_and_vacuum_options(fake_build, tmp_path):
+    result = runner.invoke(
+        app,
+        [
+            "build",
+            "sub.cif",
+            "film.cif",
+            "--min-thickness",
+            "9",
+            "--min-thickness-substrate",
+            "12",
+            "--min-thickness-film",
+            "4",
+            "--vacuum",
+            "20",
+            "--outdir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, _combined_output(result)
+    config = fake_build.config
+    assert config.min_thickness == 9.0
+    assert config.min_thickness_substrate == 12.0
+    assert config.min_thickness_film == 4.0
+    assert config.vacuum_thickness == 20.0
+
+
+def test_build_default_thickness_and_vacuum_match_the_config_class(fake_build, tmp_path):
+    result = runner.invoke(app, ["build", "sub.cif", "film.cif", "--outdir", str(tmp_path)])
+    assert result.exit_code == 0, _combined_output(result)
+    config = fake_build.config
+    # Defaults are read off CoherentInterfaceConfig itself, so the CLI can
+    # never drift from the builder's own defaults.
+    assert config.min_thickness == 6.0
+    assert config.min_thickness_substrate is None
+    assert config.min_thickness_film is None
+    assert config.vacuum_thickness == 15.0
+    assert config.slab_thicknesses() == (6.0, 6.0)
+
+
+@pytest.mark.parametrize("option", ["--min-thickness-substrate", "--min-thickness-film"])
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf"])
+def test_build_rejects_nonpositive_side_thickness(fake_build, option, value):
+    result = runner.invoke(app, ["build", "sub.cif", "film.cif", option, value])
+    assert result.exit_code == 2
+    assert "finite and positive" in _combined_output(result)
+    assert fake_build.loads == []
+
+
+@pytest.mark.parametrize("option", ["--min-thickness", "--vacuum"])
+@pytest.mark.parametrize("value", ["-0.1", "nan", "inf", "-inf"])
+def test_build_rejects_invalid_thickness_or_vacuum(fake_build, option, value):
+    result = runner.invoke(app, ["build", "sub.cif", "film.cif", option, value])
+    assert result.exit_code == 2
+    assert "finite and non-negative" in _combined_output(result)
+    assert fake_build.loads == []
+
+
 @pytest.mark.parametrize(
     "options",
     [
