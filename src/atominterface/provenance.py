@@ -21,7 +21,7 @@ class RunMeta:
     """Reproducibility metadata for one AtomInterface run."""
 
     tool: str = "atominterface"
-    version: str = "0.1.0"
+    version: str = "0.2.1"
     run_id: str = ""
     seed: int | None = None
     backend: str = "unknown"
