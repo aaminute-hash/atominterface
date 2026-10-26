@@ -6,7 +6,6 @@ the package remains importable in CI without heavy optional deps.
 
 from __future__ import annotations
 
-from contextlib import suppress
 from dataclasses import dataclass
 
 import numpy as np
@@ -137,10 +136,25 @@ def list_backends() -> dict[str, Capability]:
     return backend_registry.list()
 
 
+#: Import errors from :func:`autodiscover`, keyed by backend module name
+#: (``"mace_"``, ``"chgnet_"``). Empty when every optional backend loaded.
+discovery_failures: dict[str, str] = {}
+
+
 def autodiscover():  # noqa: D401
-    """Import optional backend modules so their @register calls fire."""
+    """Import optional backend modules so their register calls fire.
+
+    Import errors are recorded in :data:`discovery_failures` instead of
+    being silently swallowed. Silence is what made this hard to diagnose
+    on CI: an optional backend that failed to import simply never got
+    registered, and the only symptom was a much later
+    ``unknown backend 'chgnet'`` error with no explanation, in a test
+    whose ``importorskip`` had already passed.
+    """
     import importlib
 
     for mod in ("mace_", "chgnet_"):
-        with suppress(Exception):
+        try:
             importlib.import_module(f"atominterface.backends.{mod}")
+        except Exception as exc:  # noqa: BLE001 - optional dependency
+            discovery_failures[mod] = f"{type(exc).__name__}: {exc}"

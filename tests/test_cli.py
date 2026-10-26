@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -34,6 +35,24 @@ def _combined_output(result) -> str:
     except ValueError:
         stderr = ""
     return output + stderr
+
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI colour and attribute codes before matching on output.
+
+    Rich (through Typer) colourises CLI output whenever it decides the
+    stream is a terminal, and that decision is environment-dependent:
+    GitHub Actions enables it, a plain Windows console does not. The
+    escape sequences land *inside* option names, so
+    ``"--symmetric/--no-symmetric" in output`` passes locally and fails
+    on CI with the flag rendered as
+    ``--\\x1b[1;36m-symmetric\\x1b[0m...``. Assertions must not depend on
+    whether the environment claims to be a terminal.
+    """
+    return _ANSI_ESCAPE.sub("", text)
 
 
 def test_version_flag_prints_version() -> None:
@@ -181,8 +200,14 @@ def test_other_builder_rejects_symmetric_flag(fake_build, tmp_path):
         app, ["build", "sub.cif", "film.cif", "--builder", "plugin", "--symmetric"]
     )
     assert result.exit_code == 2
-    assert "does not support charge" in _combined_output(result)
-    assert "--symmetric/--no-symmetric" in _combined_output(result)
+    output = _plain(_combined_output(result))
+    assert "does not support charge" in output
+    # Matched in two pieces: the flag is rendered as
+    # ``--symmetric/--no-symmetric`` by some Click/Typer releases and as
+    # ``--symmetric/-no-symmetric`` by others, so asserting the whole
+    # spelling pins the suite to one dependency version.
+    assert "--symmetric" in output
+    assert "no-symmetric" in output
     assert fake_build.loads == []
 
 
@@ -391,6 +416,7 @@ def test_legacy_builder_no_candidates_keeps_preview_advice(capsys):
 def test_help_and_version_without_pymatgen():
     script = """
 import importlib.abc
+import re
 import sys
 class BlockPymatgen(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
@@ -399,13 +425,19 @@ class BlockPymatgen(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockPymatgen())
 from typer.testing import CliRunner
 from atominterface.cli import app
+# Rich colourises help output when it thinks the stream is a terminal,
+# which GitHub Actions does and a plain console does not. The escape
+# sequences land inside option names, so strip them before matching.
+_ANSI = re.compile(r"\\x1b\\[[0-9;]*[A-Za-z]")
+def plain(text):
+    return _ANSI.sub("", text)
 runner = CliRunner()
 for args in (["build", "--help"], ["--version"]):
     result = runner.invoke(app, args)
     assert result.exit_code == 0, (result.output, result.exception)
     if args[0] == "build":
-        assert "--charge-policy" in result.output
-        assert "--substrate-oxidation" in result.output
+        assert "--charge-policy" in plain(result.output)
+        assert "--substrate-oxidation" in plain(result.output)
 print("optional-dependency smoke test passed")
 """
     result = subprocess.run(
