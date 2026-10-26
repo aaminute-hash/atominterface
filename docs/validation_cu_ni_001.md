@@ -12,7 +12,11 @@ layers), and yes to accuracy at the ~5–15 % level expected of a
 general-purpose foundation uMLIP — but the interface energy is a small
 difference of two large numbers, so its *relative* uncertainty is an
 order of magnitude worse than either surface energy's. That is
-quantified in [§7](#7-why-gamma_int-is-the-weakest-number-here).
+quantified in [§8](#8-why-gamma_int-is-the-weakest-number-here).
+[§7](#7-vasp-cross-check-co-computed-reference) replaces the
+literature-only comparison in §6 with a co-computed plane-wave
+reference, and shows the gap is almost entirely model error, not a
+defect in our estimator.
 
 ---
 
@@ -154,7 +158,143 @@ literature table: our Ni is stretched +2.58 % onto Cu's lattice, and
 biaxial tension lowers a surface energy, so a value below the unstrained
 DFT band is the expected sign.
 
-## 7. Why γ_int is the weakest number here
+> **§7 qualifies both statements above.** The co-computed VASP reference
+> reproduces γ_Cu to 0.3 % but γ_Ni only to 14 %, and it places VASP's
+> γ_Ni *inside* this literature band with MACE outside it. See
+> [§7.3](#73-where-does-the-14--on-γ_ni-come-from-two-hypotheses-both-killed)
+> and [§7.6](#76-what-this-changes-about-6).
+
+## 7. VASP cross-check (co-computed reference)
+
+§6 compares against *published* DFT. This section compares against DFT
+computed on **the same geometries**, which removes every difference in
+slab construction, strain state and reference definition and leaves only
+the potential itself.
+
+### 7.1 Setup
+
+| item | value |
+|---|---|
+| code | VASP 6.4.2 (intelmpi 2017, `optcell_smart` build) |
+| pseudopotentials | PAW_PBE **Cu 22Jun2005**, **Ni 02Aug2007** |
+| plane-wave cutoff | ENCUT 520 eV, PREC = Accurate |
+| SCF | EDIFF 1e-6, LREAL = .FALSE., ALGO = Normal |
+| spin | ISPIN = 2 (control: ISPIN = 1) |
+| smearing | ISMEAR = 1, SIGMA = 0.1 (primary); ISMEAR = −5 tetrahedron (control) |
+| k-mesh | Γ-centred 12×12×1 for slabs/interface, 12×12×12 for bulk |
+| dipole correction | LDIPOL = .TRUE., IDIPOL = 3 (interface only) |
+| parallelism | KPAR = 4, NCORE = 4, 64 cores |
+| geometries | the MACE-relaxed structures, **re-used verbatim** — no re-relaxation |
+
+23 single points: interface, Cu slab, Ni slab, Cu bulk, Ni bulk, and
+9-point normal-strain grids for both coherent bulk references.
+
+**Energy convention.** Every number is VASP's `energy(sigma->0)`, *not*
+the `free energy TOTEN` line. The two differ by −T·S, and that term is
+**not constant across these cells** — it ranges from −1.9 meV (Cu
+substrate slab) to +0.2 meV (Ni coherent cells). Mixing the two
+definitions inside one energy difference injects ≈ 0.002 J/m² into
+γ_Cu, which is half the entire γ_Cu discrepancy being measured. Only
+`sigma->0` is comparable with the tetrahedron set, which has no entropy
+term at all.
+
+### 7.2 Results
+
+| quantity | VASP | MACE | Δ | Δ% |
+|---|---|---|---|---|
+| γ_Cu (J/m²) | **1.5023** | 1.4980 | +0.0043 | **+0.3 %** |
+| γ_Ni (J/m²) | **2.1933** | 1.9189 | +0.2744 | **+14.3 %** |
+| W_ad (J/m²) | **3.4018** | 3.3579 | +0.0439 | +1.3 % |
+| γ_int (J/m²) | **0.2938** | 0.0590 | +0.2348 | +398 % |
+| strain self-energy, Cu (eV/atom) | −0.00098 | −0.00035 | −0.00063 | — |
+| strain self-energy, Ni (eV/atom) | **+0.01081** | +0.01057 | +0.00024 | **+2.3 %** |
+
+The coherent-reference machinery transfers cleanly to plane-wave DFT:
+VASP and MACE agree on the Ni strain self-energy to 2.3 %, and the
+optimal out-of-plane strain agrees to within one grid step
+(−0.030 vs −0.030 for Ni). **The estimator is not in question.**
+
+### 7.3 Where does the 14 % on γ_Ni come from? Two hypotheses, both killed
+
+| hypothesis | test | shift in γ_Ni | share of the 0.2744 gap |
+|---|---|---|---|
+| Fermi-smearing error (Ni has high DOS at E_F) | `ISMEAR=-5` tetrahedron, entire Ni branch re-run (11 jobs) | **−0.0019** | **−0.7 %** |
+| MACE is spin-unpolarised, VASP is not | `ISPIN=1` on the same geometries | +0.0156 | +5.7 % |
+| **residual = MACE model error** | — | **+0.2607** | **95.0 %** |
+
+Neither explanation survives. The tetrahedron method moves γ_Ni by
+0.002 J/m² — two orders of magnitude less than the gap — so the
+smearing choice is exonerated. Removing spin *raises* VASP's γ_Ni to
+2.2089, i.e. magnetism pushes VASP **towards** MACE, not away from it;
+it cannot be the source of a gap in the opposite direction.
+
+The verdict is therefore that **MACE-MP-0 under-predicts the Ni(001)
+surface energy by ~14 %**, and our VASP value of 2.1933 J/m² sits
+inside the literature band quoted in §6 (1.98–2.23), while MACE's
+1.9189 sits *below* it. This upgrades §6's "expected uMLIP error" from
+a plausible story to a measured one, and it moves the burden of proof:
+the number to distrust is MACE's γ_Ni, not our pipeline's.
+
+*Caveat on the controls:* `ISMEAR=-5` and `ISPIN=1` were run on the Ni
+branch only. W_ad and γ_int are deliberately **not** reported for them,
+because the interface energy comes from the primary setting and mixing
+the two Hamiltonians inside one difference would be meaningless.
+
+### 7.4 The γ_int gap is inherited, not interfacial
+
+γ_int = γ_Cu + γ_Ni − W_ad, so the three error contributions add
+directly:
+
+```
+d(γ_Cu)   +0.0043
+d(γ_Ni)   +0.2744     <-- 117 % of the total gap
+−d(W_ad)  −0.0439
+────────────────────
+sum       +0.2348   ==  direct gap +0.2348   (exact)
+```
+
+**W_ad — the actual Cu–Ni bonding term — agrees to 1.3 %.** The 5×
+discrepancy in γ_int is not a failure to describe the interface; it is
+the Ni surface error passing straight through a near-cancelling
+difference. This is the operational content of §8, now measured rather
+than argued: anyone quoting γ_int from this pipeline must carry the
+γ_Ni error budget with it, because it arrives undamped.
+
+### 7.5 Numerical convergence of the reference
+
+| item | value |
+|---|---|
+| interface SCF at NELM = 200 | **not converged**, \|dE\| = 1.5 × 10⁻⁴ eV |
+| interface SCF at NELM = 600 | converged, DAV step 178, \|dE\| = 1.8 × 10⁻⁷ eV |
+| energy difference between the two | 0.63 meV |
+| effect on γ_int | **0.0016 J/m² (0.53 %)** |
+| dipole correction | **required** — without it the asymmetric interface slab diverges to −30863 eV with `BRMIX: very serious problems` |
+
+The reported γ_int uses the converged (NELM = 600) value. The residual
+is 0.5 % of γ_int — negligible next to the 0.23 J/m² model term.
+
+### 7.6 What this changes about §6
+
+- §6 attributed the low γ_Ni partly to the +2.58 % coherent strain.
+  That attribution is now **weakened**: the strain self-energy is
+  +0.0108 eV/atom in VASP and +0.0106 in MACE, i.e. both codes handle
+  the strain the same way. Strain is a property of the *state* being
+  computed, not a disagreement between the two potentials.
+- §6's literature band remains the right sanity check, but our VASP
+  value is now inside it and MACE's is outside it. The correct wording
+  is "MACE is 3–14 % below the DFT band", not "our value is below the
+  band because it is strained".
+- **A caveat that cuts the other way, and should not be hidden:** on
+  **Cu** the two codes agree to 0.3 %, yet *both* sit +4 % to +17 %
+  **above** the literature band in §6 (VASP 1.5023 vs 1.29–1.44). Where
+  MACE and plane-wave PBE agree with each other and disagree with the
+  published range, the suspicious quantity is more likely the
+  literature band than either code — those values come from thinner
+  slabs and older conventions. The §6 band should be treated as a
+  ±0.1–0.2 J/m² context, not a target. We have not chased this further;
+  a thickness-converged VASP γ_Cu (4 → 14 layers) would settle it.
+
+## 8. Why γ_int is the weakest number here
 
 `gamma_int = gamma_Cu + gamma_Ni − W_ad/area`, and the terms nearly
 cancel:
@@ -177,7 +317,7 @@ not ± 0.003 (scan scatter).
 Anyone quoting γ_int from this pipeline should carry the surface-energy
 error budget with it.
 
-## 8. Committee / OOD
+## 9. Committee / OOD
 
 With a second real model mounted (MACE-MP-0 **small** as committee
 member, medium as primary) on the 18-atom interface:
@@ -218,7 +358,7 @@ run with `committee_enabled=true` queried model disagreement. The explicit
 fields prevent the old ambiguous zero from being mistaken for a committee
 certificate.
 
-## 9. Reproducibility
+## 10. Reproducibility
 
 Two independent processes, same command, `--min-thickness 14.4`:
 
@@ -241,13 +381,20 @@ and the dummy calculator draws from an unseeded RNG. The demo driver
 always passes `seed=0`. This has no effect on the test suite, which
 never asserts dummy forces.
 
-## 10. Limitations
+## 11. Limitations
 
-- **No VASP cross-check.** Phase 0.3 of the roadmap asks for at least
-  one candidate verified against a VASP single point. No plane-wave
-  code is available in this environment, so the comparison in §6 is
-  against published DFT values, not a co-computed reference. This is the
-  largest open gap.
+- **One VASP candidate, at one geometry.** §7 verifies the 1×1 coherent
+  cell only, and it is still one entry, not the 5–10 the roadmap asks
+  for. The cross-check is also single-point: no VASP relaxation was
+  performed, so the comparison tests the *energy estimator* on MACE's
+  geometries, not the relaxation path itself. A VASP relaxation would
+  test both, and would also expose any error in the MACE geometries
+  that a single point cannot see.
+- **γ_Ni is MACE-limited, not pipeline-limited.** §7.3 shows 95 % of the
+  14 % gap is model error. This is now a characterisation of MACE-MP-0,
+  not an open defect in AtomInterface — but it does mean γ_Ni, and
+  therefore γ_int, cannot be quoted to better than ~14 % / ~0.23 J/m²
+  with this backend regardless of how carefully the pipeline is run.
 - **One candidate, not 5–10.** The roadmap asks for a candidate table.
   The demo caps `max_area` at 100 Å² and `max_candidates` at 1, so it
   emits the single 1×1 cell. Widening that is a knob, not a code
@@ -263,7 +410,7 @@ never asserts dummy forces.
   is trained on spin-unpolarised PBE (except Fe, Ni, Co and Mn in some
   variants) and all energies here are 0 K static-lattice values.
 
-## 11. Reproducing this note
+## 12. Reproducing this note
 
 ```bash
 python examples/03_interface_energy.py --backend mace --device cpu \
