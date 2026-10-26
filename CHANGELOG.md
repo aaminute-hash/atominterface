@@ -1,72 +1,82 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.1] - 2026-10-26
 
 ### Added
+- **Energy results fail closed.** `candidates.csv` now carries `valid`,
+  `committee_enabled` and `ood_monitoring`. `valid=true` requires finite
+  energies for both bulk references, and finite energies and forces plus
+  convergence for the two reference slabs and the interface. When any node
+  fails, the row and its structures are still written for diagnosis, but
+  every gamma cell is left empty and the driver exits non-zero -- a missing
+  gamma is now distinct from a physically computed zero.
 - `atominterface.relax.proximity`: minimum-image distance helpers
   (`minimum_image_distances`, `nearest_image_vectors`,
   `pairwise_distance_matrix`, `pairwise_min_distance`) built on
   `ase.geometry.find_mic`, so skewed cells and mixed `pbc` masks are
   handled.
-- `NeighborWatcher` results now carry `per_atom` (each atom's relative
-  bond shortfall) and `meta["threshold"]` / `meta["min_pair"]`.
-- `CommitteeWatcher` results now carry `meta["committee_state"]`
-  (`disabled` / `unavailable` / `degraded` / `ok`) plus
-  `committee_requested` / `committee_members` / `committee_failed`.
+- `NeighborWatcher` results carry `per_atom` and `meta["threshold"]` /
+  `meta["min_pair"]`.
+- `CommitteeWatcher` results carry `meta["committee_state"]`
+  (`disabled` / `unavailable` / `degraded` / `ok`) together with
+  `committee_requested` / `committee_members` / `committee_failed`, and
+  `_record_committee_state()` resolves the worst state observed into the
+  run metadata.
 - `cut_cluster()` accepts `record=` and fills
-  `QuarantineRecord.cluster_indices`; the kept indices are also on
+  `QuarantineRecord.cluster_indices`; the kept indices are also written to
   `cluster.info["cluster_indices"]`.
+- Calculator construction failures are recorded as row failures instead of
+  aborting the whole energy run.
 
 ### Fixed
 - **`NeighborWatcher` ignored periodic boundaries.** Distances were bare
   cartesian, so a contact straddling the cell edge of a slab cell was
   invisible. Distances are now minimum-image.
 - **`NeighborWatcher`'s threshold drifted with the vacuum.** It was
-  `mean(|a_i|) / 10 * 0.6`, so thickening a slab's vacuum from 10 A to
-  40 A raised it from 0.6 A to 1.2 A and could flip a clean structure
-  to out-of-distribution with no change to the geometry. The threshold
-  is now `min_dist_frac * (r_i + r_j)` over the covalent radii of the
-  bonded pair -- a local length scale.
-- **`cut_cluster()` ignored its own `include_images` flag.** The
-  neighbour across the periodic boundary was dropped from the cluster
-  cut to investigate it. Images are now honoured, and each source atom
-  is emitted at the image nearest the centre so the result is one
-  contiguous ball.
-- **`QuarantineRecord.cluster_indices` was never assigned.**
+  `mean(|a_i|) / 10 * 0.6`, so thickening a slab's vacuum from 10 A to 40 A
+  raised it from 0.6 A to 1.2 A and could flip a clean structure to
+  out-of-distribution with no change to the geometry. The threshold is now
+  `min_dist_frac * (r_i + r_j)` over the covalent radii of the bonded pair.
+- **`cut_cluster()` ignored its own `include_images` flag.** The neighbour
+  across the periodic boundary was dropped from the cluster cut intended to
+  investigate it. Images are now honoured, and each source atom is emitted at
+  the image nearest the centre so the result is one contiguous ball.
+- **`GuardedRelaxer` evaluated the watcher chain only between optimization
+  calls.** It now walks `irun()`, so a transient excursion inside one
+  `opt.run()` can no longer hide behind benign final forces.
+- **`_aggregate()` dropped `per_atom` and `meta`.** The quarantine cluster was
+  therefore always anchored on atom 0 and the committee state was invisible:
+  an outage scored 0.0, could never win the argmax, and never surfaced. The
+  winning watcher's signals now propagate, and a winner without per-atom
+  signal raises `quarantine_center_degraded` instead of silently centring on
+  atom 0.
 - **A committee that could not run was indistinguishable from one that
   agreed.** Both scored `0.0`; an unusable committee now reports
-  `committee_state="unavailable"` (or `"degraded"` when some members
-  were dropped) and `reason="committee_unavailable"`.
-- **`cut_cluster()` accepted an out-of-range `center_index` silently.**
-  It now raises `IndexError` instead of cutting around index 0.
-- **Energy results failed open.** `examples/03_interface_energy.py`
-  returned exit code 0 and wrote a plausible gamma whether or not the
-  slabs converged, OOD tripped or the calculator raised. `RelaxResult`
-  gained `valid` / `final_energy` / `energies_finite` / `forces_finite`
-  / `exception`; gamma is only computed when the substrate slab, the
-  film slab, the interface and every reference state are valid, an
-  invalid candidate keeps its diagnostics but leaves gamma empty, and
-  the batch exits non-zero.
-- **Model-loading failures were swallowed.** `mace_.py` silently fell
-  back through every tier, and `GuardedRelaxer._wrap()` fabricated a
-  zero-force calculator for anything it could not construct. Both now
-  raise with the full chain of causes.
-- **`ood_score=0` was readable as "in distribution".** CSV and metadata
-  now carry `committee_enabled` and `ood_monitoring` explicitly.
+  `committee_state="unavailable"` (or `"degraded"` when some members were
+  dropped) with `reason="committee_unavailable"`, and overrides
+  `ood_monitoring` so a monitoring outage is never readable as consensus.
+- `QuarantineRecord.cluster_indices` was never assigned.
+- `cut_cluster()` accepted an out-of-range `center_index` silently; it now
+  raises `IndexError`.
+- **Model-loading failures were swallowed.** `mace_.py` silently fell back
+  through every tier, and `GuardedRelaxer._wrap()` fabricated a zero-force
+  calculator for anything it could not construct, so a backend that never
+  loaded produced plausible-looking zeros. Both now raise with the full
+  chain of causes.
+- **`ood_score=0` was readable as "in distribution".** The CSV and the run
+  metadata now carry `committee_enabled` and `ood_monitoring` explicitly, so
+  a zero that merely means "no committee was asked" can no longer be
+  mistaken for a certificate.
 
 ### Changed
-- `GuardedRelaxer` evaluates the watcher chain after **every optimizer
-  step** (through `irun()`), not only at guard-iteration boundaries: a
-  transient excursion inside one `opt.run()` call can no longer hide
-  behind benign final forces.
-- `_aggregate()` forwards `per_atom` and `meta` from the winning
-  watcher, so a quarantine cluster anchors on the worst atom instead of
-  always atom 0, and committee state reaches the result.
-- `RelaxResult.metadata` now carries `committee_state`
-  (`not_configured` / `disabled` / `unavailable` / `degraded` / `ok`),
-  resolved worst-first; `unavailable` also overrides `ood_monitoring`
-  and appends a reason, so a monitoring outage can never be read as
-  consensus.
+- `docs/validation_cu_ni_001.md`: the Cu(001) | Ni(001) note documents the
+  validity contract behind gamma, explains how to read the new `valid`,
+  `committee_enabled` and `ood_monitoring` fields instead of the old
+  ambiguous `ood_score=0.000000`, and records a fail-closed wiring check that
+  reproduces without model weights -- `python
+  examples/03_interface_energy.py --backend dummy --max-steps 1 --fmax
+  0.000001` must exit non-zero while keeping `candidates.csv` with
+  `valid=False` and empty gamma cells.
 
 ## [0.2.0] - 2026-10-25
 
