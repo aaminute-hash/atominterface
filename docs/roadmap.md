@@ -33,12 +33,22 @@ technical note is `docs/validation_cu_ni_001.md`: thickness and vacuum
 convergence scans, a comparison against published DFT surface energies,
 and an uncertainty budget for gamma_int (which turns out to be the
 weakest number in the ledger, at ~1.7 % of the quantities it is
-subtracted from).
+subtracted from). A co-computed plane-wave reference was added later,
+as §7 of the same note.
 
-Two deliverables below are still open. **No VASP single point** was
-computed — this environment has no plane-wave code, so the cross-check
-in the note is against published DFT values rather than a co-computed
-reference. And the candidate table is **one 1x1 cell, not 5–10**: the
+One of the two deliverables below is now closed, one is still open.
+**The VASP single point is computed** — 23 single points on the
+MACE-relaxed geometries (VASP 6.4.2, PAW_PBE, energies taken as
+`energy(sigma->0)` throughout), giving γ_Cu 1.5023 vs 1.4980 J/m²
+(+0.3 %), γ_Ni 2.1933 vs 1.9189 (+14.3 %) and W_ad 3.4018 vs 3.3579
+(+1.3 %). The γ_int difference closes exactly through γ_int = γ_Cu +
+γ_Ni − W_ad, so it is inherited from the Ni surface term rather than
+from interfacial bonding, which agrees to 1.3 %; ~95 % of the γ_Ni gap
+is MACE-MP-0 model error, not smearing (which shifts γ_Ni by
+0.002 J/m²) or missing spin (which moves VASP *towards* MACE). Record
+and controls: [validation note §7](docs/validation_cu_ni_001.md#7-vasp-cross-check-co-computed-reference).
+
+Still open: the candidate table is **one 1x1 cell, not 5–10**: the
 demo caps `max_area` at 100 A^2 and `max_candidates` at 1. Widening
 that is a knob, not a code change, but it has not been run.
 
@@ -49,7 +59,8 @@ and the CLI / example 03 end-to-end driver — lands with v0.2.0.
 Deliverables:
 
 - 5–10 low-strain candidates with formation energy + OOD trace
-- At least one cross-checked with a VASP single-point
+- At least one cross-checked with a VASP single-point (done — the 1x1
+  cell, validation note §7)
 - A short paper: *"Where uMLIPs lie about interfaces"*
 
 ## Phase 0.4 — AutoConstitutive data pipeline
