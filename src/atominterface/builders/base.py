@@ -8,6 +8,7 @@ consume Candidates -- never raw ASE Atoms.
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -100,6 +101,28 @@ class Candidate:
     n_substrate: int = 0
     n_film: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Bilateral area bookkeeping.  ``area`` stays the single scalar the
+    # rest of the stack already consumes; these record *which* side that
+    # scalar came from and whether the two sides actually agree.  NaN is
+    # the "not supplied" sentinel resolved in ``__post_init__``: an
+    # unknown side falls back to ``area`` rather than to 0, which would
+    # silently claim a degenerate cell.
+    area_substrate: float = float("nan")
+    area_film: float = float("nan")
+    area_consistent: bool = True
+    area_policy: str = "strict"
+
+    def __post_init__(self) -> None:
+        """Fall back to ``area`` for either side when it was not given.
+
+        Callers that build a Candidate by hand still pass only ``area``;
+        they must not be handed a NaN (or a misleading 0.0) for a side
+        whose area was never measured separately.
+        """
+        if math.isnan(self.area_substrate):
+            self.area_substrate = float(self.area)
+        if math.isnan(self.area_film):
+            self.area_film = float(self.area)
 
     def to_atoms(self) -> Any:
         """Return the ASE Atoms view, with info dict populated."""

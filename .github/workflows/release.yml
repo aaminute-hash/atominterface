@@ -1,29 +1,133 @@
 name: Release
 
+# Two independent distribution channels, both driven by a semver tag:
+#
+#   1. GitHub Release (always on, zero configuration) - the sdist and the wheel
+#      are attached to the release, so `pip install <release-url>` works even
+#      though the package is not on PyPI.
+#   2. PyPI (opt-in) - enabled as soon as either a PYPI_API_TOKEN secret exists
+#      or the repository variable PUBLISH_TO_PYPI is set to "true" (the latter
+#      uses OIDC Trusted Publishing and needs no long-lived secret).
+#
+# Nothing is blocked while channel 2 is off: pushing a tag still produces a
+# complete, installable release.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: "Also upload to PyPI (needs PYPI_API_TOKEN or a configured Trusted Publisher)"
+        type: boolean
+        default: false
 
 jobs:
-  publish:
+  verify:
+    name: Verify
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Build
+
+      # Mirrors .github/workflows/ci.yml so a tag can never release code that
+      # CI would have rejected (CI itself is not triggered by tag pushes).
+      - name: Install dependencies
         run: |
-          pip install --upgrade pip build
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          # pymatgen is optional; install it when available
+          pip install pymatgen || echo "pymatgen install skipped"
+          # Real MLIP backends are optional: an install failure must not fail
+          # the run, the corresponding tests skip via pytest.importorskip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu || echo "torch install skipped"
+          pip install mace-torch || echo "mace install skipped"
+          pip install chgnet || echo "chgnet install skipped"
+
+      - name: Lint with ruff
+        run: ruff check src tests examples
+
+      - name: Format check with ruff
+        run: ruff format --check src tests examples
+
+      - name: Type check with mypy
+        run: mypy src/atominterface
+
+      - name: Run tests
+        run: pytest --cov=atominterface --cov-report=term-missing
+
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    needs: verify
+    permissions:
+      # create the GitHub Release and attach the built artifacts
+      contents: write
+      # OIDC token for PyPI Trusted Publishing (no long-lived secret needed)
+      id-token: write
+    env:
+      # The PyPI channel is opt-in. It turns itself on as soon as the project
+      # is actually able to authenticate to PyPI, so flipping it later is a
+      # configuration change, not a workflow change. Set PUBLISH_TO_PYPI=false
+      # to keep a configured token dormant.
+      PUBLISH_TO_PYPI: >-
+        ${{ inputs.publish_to_pypi == true || vars.PUBLISH_TO_PYPI == 'true' || secrets.PYPI_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # v0.2.0 shipped as an empty shell because nothing checked that the tag
+      # agreed with the code. A tag that disagrees with pyproject/__init__ is a
+      # release bug, so fail before anything is uploaded.
+      - name: Check tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -1)"
+          src_version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/atominterface/__init__.py | head -1)"
+          echo "tag=${tag_version} pyproject=${pkg_version} __init__=${src_version}"
+          if [ "${pkg_version}" != "${src_version}" ]; then
+            echo "::error::pyproject.toml version (${pkg_version}) disagrees with __version__ (${src_version})"
+            exit 1
+          fi
+          if [ "${tag_version}" != "${pkg_version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package version ${pkg_version}"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: |
+          pip install --upgrade pip build twine
           python -m build
+          twine check dist/*
+          ls -l dist/
+
       - name: Publish to PyPI
+        if: env.PUBLISH_TO_PYPI == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          # Empty password falls through to OIDC Trusted Publishing, so both
+          # authentication routes work without editing this file.
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Report PyPI channel as off
+        if: env.PUBLISH_TO_PYPI != 'true'
+        run: |
+          echo "::notice title=PyPI upload skipped::Publishing to the GitHub Release only. To enable PyPI later: add the PYPI_API_TOKEN secret, or set the repository variable PUBLISH_TO_PYPI=true and register this workflow as a Trusted Publisher on pypi.org."
+
+      # fail_on_unmatched_files keeps an empty dist/ from silently producing
+      # another asset-less release.
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
