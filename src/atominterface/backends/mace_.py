@@ -11,6 +11,20 @@ from urllib.request import urlopen
 from .base import Capability
 from .registry import backend_registry
 
+#: Torch dtypes the MACE backend accepts. ``"float32"`` is the default
+#: (matching mace-torch's behaviour when no dtype is requested);
+#: ``"float64"`` enables double-precision reference runs used to
+#: separate physics from float32 rounding in validation studies.
+SUPPORTED_DTYPES = ("float32", "float64")
+
+
+def _validate_dtype(dtype: str) -> str:
+    """Return ``dtype`` unchanged, or raise if it is not supported."""
+    if dtype not in SUPPORTED_DTYPES:
+        raise ValueError(f"unsupported dtype {dtype!r}; supported values: {list(SUPPORTED_DTYPES)}")
+    return dtype
+
+
 #: Canonical download URL of the MACE-MP-0 "medium" foundation model
 #: (2 message-passing layers, 128 channels, trained on the Materials
 #: Project; ~44 MB checkpoint). The GitHub release asset redirects to the
@@ -94,7 +108,7 @@ def _capability() -> Capability:
     )
 
 
-def _instantiate(cls: Any, device: str, **weight_kwargs: Any) -> Any:
+def _instantiate(cls: Any, device: str, dtype: str = "float32", **weight_kwargs: Any) -> Any:
     """Instantiate ``cls`` with the first weights kwarg spelling it accepts.
 
     mace-torch renamed the weights argument across releases
@@ -107,19 +121,24 @@ def _instantiate(cls: Any, device: str, **weight_kwargs: Any) -> Any:
     Args:
         cls: ``MACECalculator`` (or a compatible drop-in).
         device: ASE/torch device string forwarded to the calculator.
+        dtype: torch dtype forwarded as ``default_dtype``; ``"float32"``
+            keeps the historical behaviour, ``"float64"`` selects
+            double precision for reference runs.
         **weight_kwargs: Ordered tiers of ``{kwarg_name: value}``.
 
     Returns:
         A constructed calculator instance.
 
     Raises:
+        ValueError: If ``dtype`` is not in :data:`SUPPORTED_DTYPES`.
         RuntimeError: If every weights kwarg spelling was rejected.
     """
+    _validate_dtype(dtype)
     attempts: list[str] = []
     last_error: Exception | None = None
     for key, value in weight_kwargs.items():
         try:
-            return cls(**{key: value}, device=device)
+            return cls(**{key: value}, device=device, default_dtype=dtype)
         except Exception as exc:  # noqa: BLE001
             attempts.append(f"{key}: {type(exc).__name__}: {exc}")
             last_error = exc
@@ -128,7 +147,7 @@ def _instantiate(cls: Any, device: str, **weight_kwargs: Any) -> Any:
     ) from last_error
 
 
-def _load_default(cls: Any, device: str) -> Any:
+def _load_default(cls: Any, device: str, dtype: str = "float32") -> Any:
     """Load the default MACE-MP-0 medium foundation model.
 
     Tier order (first success wins):
@@ -144,13 +163,19 @@ def _load_default(cls: Any, device: str) -> Any:
     Args:
         cls: ``MACECalculator`` (or a compatible drop-in).
         device: ASE/torch device string forwarded to the calculator.
+        dtype: torch dtype forwarded to ``mace_mp`` (and to the manual
+            fallback as ``default_dtype``); ``"float32"`` keeps the
+            historical behaviour, ``"float64"`` selects double precision
+            for reference runs.
 
     Returns:
         A constructed calculator instance bound to the default weights.
 
     Raises:
+        ValueError: If ``dtype`` is not in :data:`SUPPORTED_DTYPES`.
         RuntimeError: If the checkpoint cannot be obtained (e.g. offline).
     """
+    _validate_dtype(dtype)
     attempts: list[str] = []
     try:
         from mace.calculators import mace_mp  # type: ignore[import-untyped]
@@ -159,7 +184,7 @@ def _load_default(cls: Any, device: str) -> Any:
         mace_mp = None  # type: ignore[assignment]
     if mace_mp is not None:
         try:
-            return mace_mp(model="medium", device=device)
+            return mace_mp(model="medium", device=device, dtype=dtype)
         except Exception as exc:  # noqa: BLE001
             attempts.append(f"mace_mp helper: {type(exc).__name__}: {exc}")
     try:
@@ -167,6 +192,7 @@ def _load_default(cls: Any, device: str) -> Any:
         return _instantiate(
             cls,
             device,
+            dtype,
             model_paths=[str(local_path)],
             model_path=str(local_path),
         )
@@ -178,6 +204,10 @@ def _load_default(cls: Any, device: str) -> Any:
 
 
 def _factory(**kwargs):  # noqa: D401
+    device = str(kwargs.get("device", "cpu"))
+    # Validated before the optional-dependency import so a misspelled
+    # dtype raises ValueError even where mace-torch is absent.
+    dtype = _validate_dtype(str(kwargs.get("dtype", "float32")))
     try:
         from mace.calculators import MACECalculator  # type: ignore[import-untyped]
     except Exception as exc:  # noqa: BLE001
@@ -185,7 +215,6 @@ def _factory(**kwargs):  # noqa: D401
             "mace-torch is not installed; install it with `pip install mace-torch`"
         ) from exc
 
-    device = str(kwargs.get("device", "cpu"))
     # Optional user override: an explicit checkpoint (local path or URL)
     # wins over the default foundation model. ``model_path`` is the legacy
     # singular spelling and is normalised onto ``model_paths``.
@@ -193,8 +222,10 @@ def _factory(**kwargs):  # noqa: D401
 
     def _calc(atoms):  # noqa: A002
         if override is not None:
-            return _instantiate(MACECalculator, device, model_paths=override, model_path=override)
-        return _load_default(MACECalculator, device)
+            return _instantiate(
+                MACECalculator, device, dtype, model_paths=override, model_path=override
+            )
+        return _load_default(MACECalculator, device, dtype)
 
     return _calc
 
