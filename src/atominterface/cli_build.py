@@ -29,8 +29,10 @@ except ImportError:  # pragma: no cover - older typer builds on the real click
 import atominterface.builders  # noqa: F401  (import side effect: registers built-in builders)
 from atominterface.backends.registry import backend_registry
 from atominterface.builders.candidates import charge_summary
+from atominterface.builders.coherent import CoherentInterfaceConfig
 from atominterface.builders.registry import builder_registry
 from atominterface.io import canonicalize_arrays
+from atominterface.run_config import load_run_config, save_run_config
 
 app = typer.Typer(
     help="Build interface candidates from two bulk structures.",
@@ -38,6 +40,39 @@ app = typer.Typer(
 )
 
 _DEFAULT_OUTDIR = Path("outputs/build")
+#: Single source of truth for build-geometry defaults: the CLI advertises
+#: exactly what ``CoherentInterfaceConfig`` falls back to, so a recorded
+#: run never depends on a second, driftable copy of the same numbers.
+_COHERENT_DEFAULTS = CoherentInterfaceConfig()
+#: Keys accepted in a ``--config`` YAML file; anything else is rejected so
+#: a typo can never be silently ignored during a replay.
+_RUN_CONFIG_KEYS = frozenset(
+    {
+        "builder",
+        "sub_miller",
+        "film_miller",
+        "max_strain",
+        "max_area",
+        "gap",
+        "min_thickness",
+        "min_thickness_substrate",
+        "min_thickness_film",
+        "vacuum",
+        "max_candidates",
+        "charge_policy",
+        "substrate_oxidation",
+        "film_oxidation",
+        "charge_tolerance",
+        "dipole_tolerance",
+        "symmetric",
+        "relax",
+        "backend",
+        "device",
+        "fmax",
+        "max_steps",
+        "ood_threshold",
+    }
+)
 _CHARGE_POLICIES = ("report", "require-neutral", "require-nonpolar")
 _CHARGE_OPTIONS = (
     "charge_policy",
@@ -170,6 +205,19 @@ def _finite_nonnegative(value: float) -> float:
     return value
 
 
+def _finite_positive(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        raise typer.BadParameter("must be finite and positive")
+    return value
+
+
+def _optional_finite_positive(value: float | None) -> float | None:
+    """Per-side thickness overrides: ``None`` means "fall back to the shared value"."""
+    if value is None:
+        return None
+    return _finite_positive(value)
+
+
 def _parse_oxidation(values: list[str], option: str) -> dict[str, float] | None:
     """Parse repeated Element=charge options without relying on pymatgen."""
     from ase.data import atomic_numbers
@@ -217,6 +265,29 @@ def _check_charge_support(ctx: typer.Context, builder_name: str, symmetric: bool
             f"builder {builder_name!r} does not support charge options: {', '.join(requested)}",
             param_hint="--builder",
         )
+
+
+def _load_config_overrides(config_file: Path | None) -> dict[str, Any]:
+    """Load a ``--config`` YAML file, rejecting keys the run never reads.
+
+    An unknown key in a replayed configuration is almost always a typo
+    (``min_thikness``) or a stale schema; silently dropping it would make
+    the replay differ from the recorded run without any sign.
+    """
+    if config_file is None:
+        return {}
+    try:
+        overrides = load_run_config(config_file)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc), param_hint="--config") from None
+    unknown = sorted(set(overrides) - _RUN_CONFIG_KEYS)
+    if unknown:
+        raise typer.BadParameter(
+            f"unknown run configuration key(s): {', '.join(unknown)}; "
+            f"supported: {', '.join(sorted(_RUN_CONFIG_KEYS))}",
+            param_hint="--config",
+        )
+    return overrides
 
 
 def _report_no_candidates(instance, max_strain: float, max_area: float) -> None:
@@ -451,6 +522,57 @@ def _print_candidates(candidates: list) -> None:
         )
 
 
+def _resolve_run_params(
+    ctx: typer.Context, overrides: dict[str, Any], cli_values: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge a ``--config`` file with explicit CLI flags into effective parameters.
+
+    A config-file value applies only where the corresponding flag was left
+    at its default; an explicit command-line flag always wins.  Values
+    sourced from the file bypass Typer's option callbacks, so every merged
+    value is re-validated here with the very same validator the command
+    line would have applied.  The returned mapping is exactly what the run
+    records to ``run_config.yaml``, which keeps the replay file and the
+    effective configuration in lockstep by construction.
+    """
+
+    def _pick(name: str):
+        if ctx.get_parameter_source(name) not in (None, ParameterSource.DEFAULT):
+            return cli_values[name]
+        return overrides.get(name, cli_values[name])
+
+    symmetric = _pick("symmetric")
+    if symmetric is not None and not isinstance(symmetric, bool):
+        raise typer.BadParameter(
+            "symmetric must be true, false or null", param_hint="--symmetric/--no-symmetric"
+        )
+    return {
+        "builder": _pick("builder"),
+        "sub_miller": list(_pick("sub_miller")),
+        "film_miller": list(_pick("film_miller")),
+        "max_strain": float(_pick("max_strain")),
+        "max_area": float(_pick("max_area")),
+        "gap": _finite_nonnegative(float(_pick("gap"))),
+        "min_thickness": _finite_nonnegative(float(_pick("min_thickness"))),
+        "min_thickness_substrate": _optional_finite_positive(_pick("min_thickness_substrate")),
+        "min_thickness_film": _optional_finite_positive(_pick("min_thickness_film")),
+        "vacuum": _finite_nonnegative(float(_pick("vacuum"))),
+        "max_candidates": int(_pick("max_candidates")),
+        "backend": _pick("backend"),
+        "device": _validate_device(_pick("device")),
+        "relax": bool(_pick("relax")),
+        "fmax": _finite_nonnegative(float(_pick("fmax"))),
+        "max_steps": int(_pick("max_steps")),
+        "ood_threshold": _finite_nonnegative(float(_pick("ood_threshold"))),
+        "charge_policy": _charge_policy(_pick("charge_policy")),
+        "substrate_oxidation": list(_pick("substrate_oxidation")),
+        "film_oxidation": list(_pick("film_oxidation")),
+        "charge_tolerance": _finite_nonnegative(float(_pick("charge_tolerance"))),
+        "dipole_tolerance": _finite_nonnegative(float(_pick("dipole_tolerance"))),
+        "symmetric": symmetric,
+    }
+
+
 @app.command("build")
 def build(
     ctx: typer.Context,
@@ -470,6 +592,30 @@ def build(
         help="Maximum interface area in A^2. Cost grows fast with this value.",
     ),
     gap: float = typer.Option(2.0, "--gap", help="Separation gap between slabs in A."),
+    min_thickness: float = typer.Option(
+        _COHERENT_DEFAULTS.min_thickness,
+        "--min-thickness",
+        callback=_finite_nonnegative,
+        help="Minimum slab thickness in A, applied to both sides unless overridden per side.",
+    ),
+    min_thickness_substrate: float | None = typer.Option(
+        None,
+        "--min-thickness-substrate",
+        callback=_optional_finite_positive,
+        help="Override --min-thickness for the substrate side (A, must be > 0).",
+    ),
+    min_thickness_film: float | None = typer.Option(
+        None,
+        "--min-thickness-film",
+        callback=_optional_finite_positive,
+        help="Override --min-thickness for the film side (A, must be > 0).",
+    ),
+    vacuum: float = typer.Option(
+        _COHERENT_DEFAULTS.vacuum_thickness,
+        "--vacuum",
+        callback=_finite_nonnegative,
+        help="Fixed vacuum padding normal to the interface in A; never scales with thickness.",
+    ),
     max_candidates: int = typer.Option(10, "--max-candidates", help="Keep at most N candidates."),
     backend: str = typer.Option(
         "dummy",
@@ -540,53 +686,106 @@ def build(
     ),
     outdir: Path = typer.Option(_DEFAULT_OUTDIR, "--outdir", "-o", help="Output directory."),
     fmt: str = typer.Option("extxyz", "--format", help="Structure file format for candidates."),
+    config_file: Path | None = typer.Option(
+        None,
+        "--config",
+        help=(
+            "YAML run configuration to replay (for example a run_config.yaml "
+            "written by a previous run). Explicit command-line flags override it."
+        ),
+    ),
 ) -> None:
-    """Enumerate interface candidates for a substrate/film pair."""
-    builder_cls = _resolve_builder(builder)
-    _check_charge_support(ctx, builder, symmetric)
-    _resolve_backend(backend)
+    """Enumerate interface candidates for a substrate/film pair.
+
+    Every run writes its effective parameters to ``run_config.yaml`` in
+    the output directory; passing that file back through ``--config``
+    replays the run exactly, with explicit flags overriding single keys.
+    """
+    params = _resolve_run_params(
+        ctx,
+        _load_config_overrides(config_file),
+        {
+            "builder": builder,
+            "sub_miller": sub_miller,
+            "film_miller": film_miller,
+            "max_strain": max_strain,
+            "max_area": max_area,
+            "gap": gap,
+            "min_thickness": min_thickness,
+            "min_thickness_substrate": min_thickness_substrate,
+            "min_thickness_film": min_thickness_film,
+            "vacuum": vacuum,
+            "max_candidates": max_candidates,
+            "backend": backend,
+            "device": device,
+            "relax": relax,
+            "fmax": fmax,
+            "max_steps": max_steps,
+            "ood_threshold": ood_threshold,
+            "charge_policy": charge_policy,
+            "substrate_oxidation": substrate_oxidation,
+            "film_oxidation": film_oxidation,
+            "charge_tolerance": charge_tolerance,
+            "dipole_tolerance": dipole_tolerance,
+            "symmetric": symmetric,
+        },
+    )
+
+    builder_cls = _resolve_builder(params["builder"])
+    _check_charge_support(ctx, params["builder"], params["symmetric"])
+    _resolve_backend(params["backend"])
     config = _make_config(
-        builder,
-        substrate_miller=tuple(sub_miller),
-        film_miller=tuple(film_miller),
-        max_strain=max_strain,
-        max_area=max_area,
-        gap=gap,
-        max_candidates=max_candidates,
-        charge_policy=charge_policy,
-        substrate_oxidation=_parse_oxidation(substrate_oxidation, "--substrate-oxidation"),
-        film_oxidation=_parse_oxidation(film_oxidation, "--film-oxidation"),
-        charge_tolerance=charge_tolerance,
-        dipole_tolerance=dipole_tolerance,
-        symmetric_slabs="auto" if symmetric is None else symmetric,
+        params["builder"],
+        substrate_miller=tuple(params["sub_miller"]),
+        film_miller=tuple(params["film_miller"]),
+        max_strain=params["max_strain"],
+        max_area=params["max_area"],
+        gap=params["gap"],
+        min_thickness=params["min_thickness"],
+        min_thickness_substrate=params["min_thickness_substrate"],
+        min_thickness_film=params["min_thickness_film"],
+        vacuum_thickness=params["vacuum"],
+        max_candidates=params["max_candidates"],
+        charge_policy=params["charge_policy"],
+        substrate_oxidation=_parse_oxidation(
+            params["substrate_oxidation"], "--substrate-oxidation"
+        ),
+        film_oxidation=_parse_oxidation(params["film_oxidation"], "--film-oxidation"),
+        charge_tolerance=params["charge_tolerance"],
+        dipole_tolerance=params["dipole_tolerance"],
+        symmetric_slabs="auto" if params["symmetric"] is None else params["symmetric"],
     )
 
     sub = _load_structure(substrate)
     film_struct = _load_structure(film)
 
-    typer.echo(f"builder   : {builder}")
+    typer.echo(f"builder   : {params['builder']}")
     typer.echo(f"substrate : {substrate} ({sub.composition.reduced_formula})")
     typer.echo(f"film      : {film} ({film_struct.composition.reduced_formula})")
-    typer.echo(f"surfaces  : {tuple(sub_miller)} | {tuple(film_miller)}")
+    typer.echo(f"surfaces  : {tuple(params['sub_miller'])} | {tuple(params['film_miller'])}")
 
     instance = builder_cls(substrate=sub, film=film_struct, config=config)
     candidates = instance.build()
     report = getattr(instance, "last_build_report", None)
     relax_results = None
-    if relax:
+    if params["relax"]:
         relax_results = _relax_candidates(
             candidates,
-            backend=backend,
-            device=device,
-            fmax=fmax,
-            max_steps=max_steps,
-            ood_threshold=ood_threshold,
+            backend=params["backend"],
+            device=params["device"],
+            fmax=params["fmax"],
+            max_steps=params["max_steps"],
+            ood_threshold=params["ood_threshold"],
             outdir=outdir,
         )
     csv_path = _write_outputs(candidates, outdir, fmt, report, relax_results)
 
+    # Record the *effective* parameters (config file merged with explicit
+    # flags) so the run can be replayed later with ``--config``.
+    save_run_config(params, outdir / "run_config.yaml")
+
     if not candidates:
-        _report_no_candidates(instance, max_strain, max_area)
+        _report_no_candidates(instance, params["max_strain"], params["max_area"])
     else:
         _print_candidates(candidates)
     if isinstance(report, dict) and report.get("stopped_at_limit"):
