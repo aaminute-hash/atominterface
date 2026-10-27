@@ -117,6 +117,13 @@ class CoherentInterfaceConfig(BuilderConfig):
         naming the Miller indices and the ``--symmetric`` option.  ``True``
         forces mirror-symmetric boards (same termination on both surfaces,
         cut at half the configured thickness).  ``False`` disables both.
+    min_thickness_substrate : float, optional
+        Per-side override of ``min_thickness`` for the substrate slab (Å).
+        ``None`` (default) falls back to the shared ``min_thickness``, so
+        existing configurations behave exactly as before.
+    min_thickness_film : float, optional
+        Per-side override of ``min_thickness`` for the film slab (Å), with
+        the same ``None`` fallback as ``min_thickness_substrate``.
     area_policy : str, optional
         Which side's area an interface energy is normalised by when the
         two sides do **not** agree: ``"strict"`` (default) reports no
@@ -142,6 +149,8 @@ class CoherentInterfaceConfig(BuilderConfig):
     charge_tolerance: float = 1e-6
     dipole_tolerance: float = 1e-3
     symmetric_slabs: bool | str = "auto"
+    min_thickness_substrate: float | None = None
+    min_thickness_film: float | None = None
     area_policy: str = "strict"
 
     def validate(self) -> list[str]:
@@ -164,11 +173,34 @@ class CoherentInterfaceConfig(BuilderConfig):
             errors.append("vacuum_thickness must be finite and non-negative")
         if not math.isfinite(self.gap) or self.gap < 0:
             errors.append("gap must be finite and non-negative")
+        for name, value in (
+            ("min_thickness_substrate", self.min_thickness_substrate),
+            ("min_thickness_film", self.min_thickness_film),
+        ):
+            if value is not None and (not math.isfinite(value) or value <= 0):
+                errors.append(f"{name} must be finite and positive when provided")
         if self.area_policy not in AREA_POLICIES:
             errors.append(
                 f"area_policy must be one of {list(AREA_POLICIES)}, got {self.area_policy!r}"
             )
         return errors
+
+    def slab_thicknesses(self) -> tuple[float, float]:
+        """Resolved ``(substrate, film)`` minimum slab thicknesses in Å.
+
+        Each side falls back to the shared ``min_thickness`` when its
+        per-side override is ``None``; the fallback is an explicit
+        ``is None`` check (not truthiness) so a nonsensical ``0.0``
+        override survives to be reported by :meth:`validate` instead of
+        being silently replaced.
+        """
+        substrate = self.min_thickness
+        if self.min_thickness_substrate is not None:
+            substrate = self.min_thickness_substrate
+        film = self.min_thickness
+        if self.min_thickness_film is not None:
+            film = self.min_thickness_film
+        return substrate, film
 
 
 @dataclass
@@ -423,27 +455,37 @@ def _make_slabs(substrate, film, config: CoherentInterfaceConfig):
     ``symmetric_slabs`` is forced, every termination becomes a
     mirror-symmetric board (same termination on both surfaces) whose
     finished thickness respects ``min_thickness``.
+
+    Each side is cut at its own resolved thickness
+    (:meth:`CoherentInterfaceConfig.slab_thicknesses`), so a thicker
+    substrate no longer forces an equally thick film.  The vacuum padding
+    is a fixed absolute amount shared by both sides and never scales
+    with either thickness.
     """
     symmetric = config.symmetric_slabs
+    sub_thickness, film_thickness = config.slab_thicknesses()
     sides = (
-        (substrate, config.substrate_miller),
-        (film, config.film_miller),
+        (substrate, config.substrate_miller, sub_thickness),
+        (film, config.film_miller, film_thickness),
     )
     if symmetric is True:
-        terms = [_symmetric_terminations(bulk, miller, config) for bulk, miller in sides]
+        terms = [
+            _symmetric_terminations(bulk, miller, config, thickness)
+            for bulk, miller, thickness in sides
+        ]
     else:
         terms = [
             _flatten_terminations(
-                _get_terminations(bulk, miller, config.min_thickness, config.vacuum_thickness)
+                _get_terminations(bulk, miller, thickness, config.vacuum_thickness)
             )
-            for bulk, miller in sides
+            for bulk, miller, thickness in sides
         ]
     if not config.relax_terminations:
         terms = [side[:1] for side in terms]
     return terms[0], terms[1]
 
 
-def _symmetric_terminations(bulk, miller, config: CoherentInterfaceConfig):
+def _symmetric_terminations(bulk, miller, config: CoherentInterfaceConfig, min_thickness: float):
     """Mirror-symmetric boards for every termination of one surface.
 
     Routed through :func:`make_symmetric_slab` rather than mirroring the
@@ -453,11 +495,12 @@ def _symmetric_terminations(bulk, miller, config: CoherentInterfaceConfig):
     thickness (at the default ``min_thickness`` a Cu(001) board would come
     out 3.6 A instead of 6.0 A).  The bounded thickening loop inside
     :func:`make_symmetric_slab` is what makes the finished board respect
-    ``min_thickness``.
+    ``min_thickness`` -- the per-side resolved value passed in by
+    :func:`_make_slabs`, never the shared field directly.
     """
     n_cuts = len(
         _flatten_terminations(
-            _get_terminations(bulk, miller, config.min_thickness / 2.0, config.vacuum_thickness)
+            _get_terminations(bulk, miller, min_thickness / 2.0, config.vacuum_thickness)
         )
     )
     return [
@@ -467,7 +510,7 @@ def _symmetric_terminations(bulk, miller, config: CoherentInterfaceConfig):
                 bulk,
                 miller,
                 termination=idx,
-                min_thickness=config.min_thickness,
+                min_thickness=min_thickness,
                 vacuum=config.vacuum_thickness,
             ).structure,
         )

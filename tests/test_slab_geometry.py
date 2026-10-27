@@ -18,7 +18,13 @@ import numpy as np
 import pytest
 
 from atominterface.builders.charge import finite_slab_geometry
-from atominterface.builders.coherent import _flatten_terminations, _get_terminations
+from atominterface.builders.coherent import (
+    CoherentInterfaceBuilder,
+    CoherentInterfaceConfig,
+    _flatten_terminations,
+    _get_terminations,
+    _make_slabs,
+)
 
 
 def _fcc(species: str, a: float):
@@ -156,3 +162,151 @@ def test_generated_slab_is_a_finite_board_not_the_bulk_cell():
     # The bulk reference carries no slab provenance, so it is never
     # certified as a finite board.
     assert finite_slab_geometry(bulk)["finite_slab"] is False
+
+
+def _normal_metrics(structure) -> tuple[float, float]:
+    """``(board extent, total vacuum)`` measured along the slab's surface normal."""
+    matrix = np.asarray(structure.lattice.matrix, dtype=float)
+    normal = np.cross(matrix[0], matrix[1])
+    normal = normal / np.linalg.norm(normal)
+    projected = np.asarray(structure.cart_coords, dtype=float) @ normal
+    height = float(matrix[2] @ normal)
+    extent = float(projected.max() - projected.min())
+    return extent, height - extent
+
+
+def test_slab_thicknesses_fall_back_to_the_shared_min_thickness():
+    """No per-side override must behave exactly like the pre-override code."""
+    config = CoherentInterfaceConfig(min_thickness=8.0)
+    assert config.slab_thicknesses() == (8.0, 8.0)
+
+    sub_terms, film_terms = _make_slabs(_fcc("Cu", 3.615), _fcc("Ni", 3.524), config)
+    expected_sub = _flatten_terminations(
+        _get_terminations(_fcc("Cu", 3.615), (0, 0, 1), 8.0, config.vacuum_thickness)
+    )
+    expected_film = _flatten_terminations(
+        _get_terminations(_fcc("Ni", 3.524), (0, 0, 1), 8.0, config.vacuum_thickness)
+    )
+    assert [len(slab) for _, slab in sub_terms] == [len(slab) for _, slab in expected_sub]
+    assert [len(slab) for _, slab in film_terms] == [len(slab) for _, slab in expected_film]
+
+
+def test_per_side_min_thickness_overrides_apply_independently():
+    """Each side is cut at its own resolved thickness, not the shared one."""
+    config = CoherentInterfaceConfig(
+        min_thickness=4.0,
+        min_thickness_substrate=12.0,
+        min_thickness_film=6.0,
+        relax_terminations=False,
+    )
+    assert config.slab_thicknesses() == (12.0, 6.0)
+
+    sub_terms, film_terms = _make_slabs(_fcc("Cu", 3.615), _fcc("Ni", 3.524), config)
+    sub_slab = sub_terms[0][1]
+    film_slab = film_terms[0][1]
+
+    # Each side equals a direct cut at its own override...
+    expected_sub = _flatten_terminations(
+        _get_terminations(_fcc("Cu", 3.615), (0, 0, 1), 12.0, 15.0)
+    )
+    expected_film = _flatten_terminations(
+        _get_terminations(_fcc("Ni", 3.524), (0, 0, 1), 6.0, 15.0)
+    )
+    assert len(sub_slab) == len(expected_sub[0][1])
+    assert len(film_slab) == len(expected_film[0][1])
+    # ...and the substrate really is thicker than the film, which a single
+    # shared min_thickness could never express.
+    sub_extent, _ = _normal_metrics(sub_slab)
+    film_extent, _ = _normal_metrics(film_slab)
+    assert sub_extent >= 12.0 - 3.615  # within one oriented-cell repeat of the request
+    assert sub_extent > film_extent
+
+
+def test_vacuum_is_a_fixed_amount_independent_of_slab_thickness():
+    """Thicker slabs must not eat into (or inflate) the vacuum budget.
+
+    ``SlabGenerator`` spends ``min_vacuum_size`` in whole
+    oriented-unit-cell repeats of its own -- the repeat count never
+    involves ``min_slab_size`` -- so the vacuum width is bit-identical
+    for any slab thickness.  This test pins that contract.
+    """
+    bulk = _fcc("Cu", 3.615)
+    vacuums = []
+    extents = []
+    for min_thickness in (6.0, 12.0):
+        slab = _flatten_terminations(_get_terminations(bulk, (0, 0, 1), min_thickness, 15.0))[0][1]
+        extent, vacuum = _normal_metrics(slab)
+        extents.append(extent)
+        vacuums.append(vacuum)
+    # Sanity: the two cuts really differ in board thickness.
+    assert extents[1] > extents[0] + 3.0
+    # The fixed part: identical vacuum, and at least the requested 15 A.
+    assert vacuums[0] == pytest.approx(vacuums[1], abs=1e-6)
+    assert vacuums[0] >= 15.0
+
+
+def test_assembled_interface_vacuum_not_swallowed_by_thicker_substrate():
+    """``_assemble_interface`` pads exactly ``vacuum_thickness`` above the
+    topmost atom; a thicker substrate changes the cell height, not the pad.
+    """
+    cu = _fcc("Cu", 3.615)
+    ni = _fcc("Ni", 3.524)
+    top_pads = []
+    for overrides in ({}, {"min_thickness_substrate": 12.0}):
+        config = CoherentInterfaceConfig(
+            min_thickness=6.0, vacuum_thickness=15.0, relax_terminations=False, **overrides
+        )
+        builder = CoherentInterfaceBuilder(substrate=cu, film=ni, config=config)
+        candidates = builder.build_all()
+        assert candidates
+        atoms = candidates[0].atoms
+        cell_height = float(np.asarray(atoms.cell.array)[2, 2])
+        top_pads.append(cell_height - float(atoms.get_positions()[:, 2].max()))
+    assert top_pads[0] == pytest.approx(15.0, abs=1e-8)
+    assert top_pads[1] == pytest.approx(15.0, abs=1e-8)
+
+
+def test_symmetric_slabs_respect_per_side_thickness():
+    """``symmetric_slabs=True`` must use each side's resolved thickness too.
+
+    The assertion compares against boards built with the shared
+    ``min_thickness`` set to the same value, so the test does not depend
+    on exactly how many layers the mirroring loop produces.
+    """
+    cu = _fcc("Cu", 3.615)
+    overridden = CoherentInterfaceConfig(
+        min_thickness=6.0,
+        min_thickness_substrate=12.0,
+        symmetric_slabs=True,
+        relax_terminations=False,
+    )
+    plain = CoherentInterfaceConfig(
+        min_thickness=6.0, symmetric_slabs=True, relax_terminations=False
+    )
+    thick_shared = CoherentInterfaceConfig(
+        min_thickness=12.0, symmetric_slabs=True, relax_terminations=False
+    )
+
+    sub_terms, film_terms = _make_slabs(cu, cu, overridden)
+    plain_terms, _ = _make_slabs(cu, cu, plain)
+    thick_terms, _ = _make_slabs(cu, cu, thick_shared)
+
+    # Substrate side matches a shared-12 A build; film side matches the
+    # plain shared-6 A build.
+    assert [len(s) for _, s in sub_terms] == [len(s) for _, s in thick_terms]
+    assert [len(s) for _, s in film_terms] == [len(s) for _, s in plain_terms]
+    assert len(sub_terms[0][1]) > len(film_terms[0][1])
+
+
+@pytest.mark.parametrize("field", ["min_thickness_substrate", "min_thickness_film"])
+@pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf")])
+def test_per_side_thickness_must_be_positive_when_provided(field, value):
+    config = CoherentInterfaceConfig(**{field: value})
+    assert any(field in error for error in config.validate())
+
+
+def test_per_side_thickness_none_or_positive_passes_validation():
+    assert not CoherentInterfaceConfig().validate()
+    assert not CoherentInterfaceConfig(
+        min_thickness_substrate=3.0, min_thickness_film=9.0
+    ).validate()
