@@ -12,11 +12,14 @@ layers), and yes to accuracy at the ~5–15 % level expected of a
 general-purpose foundation uMLIP — but the interface energy is a small
 difference of two large numbers, so its *relative* uncertainty is an
 order of magnitude worse than either surface energy's. That is
-quantified in [§8](#8-why-gamma_int-is-the-weakest-number-here).
+quantified in [§9](#9-why-gamma_int-is-the-weakest-number-here).
 [§7](#7-vasp-cross-check-co-computed-reference) replaces the
 literature-only comparison in §6 with a co-computed plane-wave
 reference, and shows the gap is almost entirely model error, not a
-defect in our estimator.
+defect in our estimator. A separate 10-candidate run
+([§8](#8-multi-candidate-benchmark-10-supercells-one-strain)) shows
+that the residual γ_int scatter is numerical convergence error, not
+physics.
 
 ---
 
@@ -256,7 +259,7 @@ sum       +0.2348   ==  direct gap +0.2348   (exact)
 **W_ad — the actual Cu–Ni bonding term — agrees to 1.3 %.** The 5×
 discrepancy in γ_int is not a failure to describe the interface; it is
 the Ni surface error passing straight through a near-cancelling
-difference. This is the operational content of §8, now measured rather
+difference. This is the operational content of §9, now measured rather
 than argued: anyone quoting γ_int from this pipeline must carry the
 γ_Ni error budget with it, because it arrives undamped.
 
@@ -294,7 +297,60 @@ is 0.5 % of γ_int — negligible next to the 0.23 J/m² model term.
   ±0.1–0.2 J/m² context, not a target. We have not chased this further;
   a thickness-converged VASP γ_Cu (4 → 14 layers) would settle it.
 
-## 8. Why γ_int is the weakest number here
+## 8. Multi-candidate benchmark: 10 supercells, one strain
+
+§3–§7 all ran the **single 1×1 cell**. The multi-candidate ledger shipped
+in 0.2.1 (`--max-candidates 10`) has now been run end to end on the same
+system: MACE-MP-0 medium, float32, CPU, `fmax = 0.01 eV/Å`,
+`min_thickness = 14.4 Å`, vacuum 15 Å. Raw data, provenance and a
+reproduction guide live in
+[`docs/validation/cu_ni_001_multi_candidate/`](validation/cu_ni_001_multi_candidate/).
+
+**Result: 10/10 candidates succeeded** (`status=ok`, `converged=True`,
+`area_consistent=True`, `valid=True`) — none dropped, none with empty γ.
+
+| quantity | n | median | mean | min | max | spread |
+|---|---|---|---|---|---|---|
+| γ_int (J/m²) | 10 | **0.0573** | 0.0589 | 0.0568 | 0.0617 | 0.0049 |
+| γ_surf_Cu (J/m²) | 10 | 1.4977 | 1.4977 | 1.4977 | 1.4977 | 0.0000 |
+| γ_surf_Ni (J/m²) | 10 | 1.9183 | 1.9183 | 1.9183 | 1.9183 | 0.0000 |
+
+The mean γ_int (0.0589) sits above the median because the four smallest
+supercells pull it up; the median is the honest headline.
+
+**What this run actually tests.** Under `max_area = 100 Å²` every ZSL
+solution for Cu(001)‖Ni(001) is an integer multiple of the 1×1 cell, so
+all 10 candidates carry the *identical* in-plane strain (stretch
++2.5823 %, shear 0) and the reference slabs are exact supercell repeats.
+This is a **supercell-size consistency check at fixed strain**, not a
+strain scan and not a random sample — the 10 kept candidates are the
+area-smallest ones (6.53 → 26.14 Å²). Any γ_int spread must therefore be
+numerical, and it was localised as such by two control experiments:
+tiling the rank-1 relaxed geometry to 2×/3×/4× reproduces the
+single-point energies to ≤ 1.5×10⁻⁴ eV (MACE-MP-0 is size-consistent;
+the potential is not the cause), and swapping the rank-9 relaxed
+geometry into the 1×1 cell reproduces the 4× cell's energy to
+1.5×10⁻⁵ eV (same potential surface, the 1×1 relaxation simply stopped
+1.75 meV/cell higher). γ_int clusters by supercell size — **0.0617**
+(18/36 atoms), **0.0568** (54), **0.0573** (72) J/m² — and the residual
+cause is the soft out-of-plane breathing mode passing the
+`fmax = 0.01 eV/Å` gate: the same mode §5(b) documents at the looser
+0.05 tolerance, narrowed but not eliminated.
+
+**Best estimate and its shape.** γ_int ≈ **0.0568–0.0573 J/m²** with a
+one-sided error band (+0.004 / −0.001 J/m²), not a symmetric ±0.002 —
+the spread is one-directional. The 14.4 Å row of the §3 thickness scan
+(0.0617) equals the small-supercell cluster exactly, which is the
+expected signature of the same residual-convergence mechanism.
+
+**Not yet done.** The full `fmax = 0.002 eV/Å` convergence check that
+would pin the residual to ±0.001 J/m² is still running; the control
+experiments above localise the cause but do not replace it. This
+section will be updated with measured numbers when that run lands. A
+float64 control run (entry point available since v0.2.1, see §12) has
+not been run either.
+
+## 9. Why γ_int is the weakest number here
 
 `gamma_int = gamma_Cu + gamma_Ni − W_ad/area`, and the terms nearly
 cancel:
@@ -317,7 +373,7 @@ not ± 0.003 (scan scatter).
 Anyone quoting γ_int from this pipeline should carry the surface-energy
 error budget with it.
 
-## 9. Committee / OOD
+## 10. Committee / OOD
 
 With a second real model mounted (MACE-MP-0 **small** as committee
 member, medium as primary) on the 18-atom interface:
@@ -358,7 +414,7 @@ run with `committee_enabled=true` queried model disagreement. The explicit
 fields prevent the old ambiguous zero from being mistaken for a committee
 certificate.
 
-## 10. Reproducibility
+## 11. Reproducibility
 
 Two independent processes, same command, `--min-thickness 14.4`:
 
@@ -381,28 +437,42 @@ and the dummy calculator draws from an unseeded RNG. The demo driver
 always passes `seed=0`. This has no effect on the test suite, which
 never asserts dummy forces.
 
-## 11. Limitations
+## 12. Limitations
 
 - **One VASP candidate, at one geometry.** §7 verifies the 1×1 coherent
   cell only, and it is still one entry, not the 5–10 the roadmap asks
-  for. The cross-check is also single-point: no VASP relaxation was
-  performed, so the comparison tests the *energy estimator* on MACE's
-  geometries, not the relaxation path itself. A VASP relaxation would
-  test both, and would also expose any error in the MACE geometries
-  that a single point cannot see.
+  for. (The MACE side of that count is now closed — §8 runs 10/10
+  candidates — but the co-computed DFT cross-check remains
+  single-candidate.) The cross-check is also single-point: no VASP
+  relaxation was performed, so the comparison tests the *energy
+  estimator* on MACE's geometries, not the relaxation path itself. A
+  VASP relaxation would test both, and would also expose any error in
+  the MACE geometries that a single point cannot see.
 - **γ_Ni is MACE-limited, not pipeline-limited.** §7.3 shows 95 % of the
   14 % gap is model error. This is now a characterisation of MACE-MP-0,
   not an open defect in AtomInterface — but it does mean γ_Ni, and
   therefore γ_int, cannot be quoted to better than ~14 % / ~0.23 J/m²
   with this backend regardless of how carefully the pipeline is run.
-- **One candidate, not 5–10.** The roadmap asks for a candidate table.
-  The demo caps `max_area` at 100 Å² and `max_candidates` at 1, so it
-  emits the single 1×1 cell. Widening that is a knob, not a code
-  change, but it has not been run.
-- **MACE runs in float32.** `mace_mp()` defaults to float32 ("faster but
-  less accurate … use float64 for geometry optimization"). We did not
-  override it, so every number above carries float32 round-off. This is
-  a candidate follow-up, not a known defect in the measurements.
+- **Multi-candidate is implemented and run, but the candidate table is
+  not strain-resolved.** §8 closes the old "one candidate" gap: the
+  ledger and `--max-candidates` work and 10/10 candidates succeeded
+  ([data](validation/cu_ni_001_multi_candidate/)). What remains open is
+  scope: the 10 candidates are the area-smallest ones under
+  `max_area = 100 Å²` and all carry the *same* in-plane strain, so the
+  batch is a supercell-consistency check, not a strain scan or a random
+  sample. A strain-resolved candidate table, and a VASP cross-check on
+  a second, differently-strained cell, are still open.
+- **Every number in this note, including §8, ran in float32; the float64
+  entry point exists but no float64 comparison data has been produced.**
+  `mace_mp()` defaults to float32 ("faster but less accurate … use
+  float64 for geometry optimization"). As of v0.2.1 the backend accepts
+  an explicit dtype — `get_calculator("mace", dtype="float64")`, with
+  `examples/05_float64_vs_float32.py` as the demo — so the earlier
+  "no entry point" caveat is closed. The measurements still used the
+  float32 default and carry its round-off; a float64 control run,
+  expected to matter most for γ_int (whose residual scatter §8 already
+  attributes to soft-mode convergence rather than precision), has not
+  been run.
 - **γ_Cu and γ_Ni are orientation- and strain-specific.** The Ni value
   is for Ni stretched onto Cu, and neither number is the
   experimentally-quoted (orientation-averaged) surface energy.
@@ -410,11 +480,21 @@ never asserts dummy forces.
   is trained on spin-unpolarised PBE (except Fe, Ni, Co and Mn in some
   variants) and all energies here are 0 K static-lattice values.
 
-## 12. Reproducing this note
+## 13. Reproducing this note
 
 ```bash
 python examples/03_interface_energy.py --backend mace --device cpu \
     --min-thickness 14.4 --outdir outputs/energy_cu_ni
+```
+
+The 10-candidate benchmark of §8 (≈ 25 min on CPU; expected values and
+a verification checklist in
+[`docs/validation/cu_ni_001_multi_candidate/reproduce.md`](validation/cu_ni_001_multi_candidate/reproduce.md)):
+
+```bash
+python examples/03_interface_energy.py --backend mace --device cpu \
+    --max-candidates 10 --min-thickness 14.4 --vacuum 15.0 \
+    --fmax 0.01 --max-steps 200 --outdir outputs/energy_cu_ni_multi
 ```
 
 A fail-closed wiring check is reproducible without model weights:
