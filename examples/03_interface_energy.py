@@ -25,7 +25,13 @@ Outputs (in --outdir, default outputs/energy_cu_ni):
 
   candidates.csv   one row per candidate, with energy-validity and OOD
                    diagnostics; failed candidates keep their row and
-                   structures but leave the gamma cells empty
+                   structures but leave the gamma cells empty.
+                   ``min_thickness_A`` records the shared --min-thickness,
+                   while ``min_thickness_substrate_A`` and
+                   ``min_thickness_film_A`` record the per-side values the
+                   slabs were actually cut at (each side falls back to the
+                   shared value when no override was given), so the layer
+                   counts always match a recorded thickness.
   metadata.yaml    provenance: backend identity, seed, validity, artifact hash
   <rank>_*.extxyz  final interface and reference slabs, one set per candidate
   bulk_*.extxyz    bulk inputs (shared by every candidate)
@@ -118,6 +124,8 @@ CSV_FIELDS = [
     "n_layers_film",
     "vacuum_A",
     "min_thickness_A",
+    "min_thickness_substrate_A",
+    "min_thickness_film_A",
     "E_bulk_sub_ev_per_atom",
     "E_bulk_film_ev_per_atom",
     "E_bulk_sub_coh_ev_per_atom",
@@ -186,7 +194,15 @@ class EnergyLedger:
     n_layers_sub: int = 0
     n_layers_film: int = 0
     vacuum_a: float = 0.0
+    #: Shared --min-thickness (what a run without per-side overrides uses).
     min_thickness_a: float = 0.0
+    #: Resolved per-side thicknesses from ``config.slab_thicknesses()``:
+    #: the override when one was given, the shared value when it was not.
+    #: Recorded next to ``n_layers_sub`` / ``n_layers_film`` so a row can
+    #: never show a layer count generated from a different thickness than
+    #: the shared column reports.
+    min_thickness_substrate_a: float = 0.0
+    min_thickness_film_a: float = 0.0
 
     n_bulk_sub: int = 0
     n_bulk_film: int = 0
@@ -244,6 +260,8 @@ class EnergyLedger:
             "n_layers_film": str(self.n_layers_film),
             "vacuum_A": f"{self.vacuum_a:.4f}",
             "min_thickness_A": f"{self.min_thickness_a:.4f}",
+            "min_thickness_substrate_A": f"{self.min_thickness_substrate_a:.4f}",
+            "min_thickness_film_A": f"{self.min_thickness_film_a:.4f}",
             "E_bulk_sub_ev_per_atom": _cell(
                 None
                 if self.e_bulk_sub is None or not self.n_bulk_sub
@@ -718,6 +736,11 @@ def _evaluate_candidate(  # noqa: PLR0912, PLR0915
 
     errors: list[str] = list(setup_errors)
 
+    # Resolved per-side thicknesses: each side is the per-side override
+    # when one was given and the shared --min-thickness when it was not,
+    # which is exactly the value the reference slabs are cut at.
+    sub_thickness, film_thickness = config.slab_thicknesses()
+
     def record_error(stage: str, exc: Exception) -> None:
         message = f"{stage}: {type(exc).__name__}: {exc}"
         errors.append(message)
@@ -734,6 +757,8 @@ def _evaluate_candidate(  # noqa: PLR0912, PLR0915
         n_atoms=int(candidate.total_atoms),
         vacuum_a=float(config.vacuum_thickness),
         min_thickness_a=float(config.min_thickness),
+        min_thickness_substrate_a=float(sub_thickness),
+        min_thickness_film_a=float(film_thickness),
         n_bulk_sub=len(substrate_atoms),
         n_bulk_film=len(film_atoms),
         e_bulk_sub=e_bulk_sub,
