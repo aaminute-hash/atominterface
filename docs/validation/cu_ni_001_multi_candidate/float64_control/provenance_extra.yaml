@@ -1,0 +1,59 @@
+# float64 control run -- provenance supplement
+
+This file is written after the run (the script does not record it) and
+covers what the script's own metadata.yaml cannot: which code produced
+these numbers, and the precision pre-flight.
+
+## Code under test
+
+The `--dtype` flag and the backend dtype plumbing lived in two separate
+open PRs when this run was made, so the run used their merge:
+
+- base: `origin/feat/expose-dtype-and-per-side-thickness` (`a715d9e`, PR #16)
+- merged: `origin/fix/mace-default-dtype-kwarg` (`a21c7a9`, PR #17)
+- resulting detached HEAD: `c750688`
+
+Both PRs touch disjoint files (the example script and its tests versus the
+backend and its tests), so the merge is conflict-free and this HEAD is
+equivalent to `main` once both PRs are merged. Nothing in `src/` was
+modified for this run.
+
+## Command
+
+```bash
+PYTHONPATH=<worktree>/src python examples/03_interface_energy.py \
+    --backend mace --dtype float64 --fmax 0.01 --max-candidates 4 \
+    --outdir F:/tmp/d1_float64
+```
+
+`--fmax 0.01` and `--max-candidates 4` deliberately match the float32
+multi-candidate batch (../), so precision is the only variable.
+
+## Precision pre-flight (must pass before the run starts)
+
+```python
+from atominterface.backends.mace_ import _load_default
+from mace.calculators import MACECalculator
+calc = _load_default(MACECalculator, "cpu", "float64")
+assert str(next(calc.models[0].parameters()).dtype) == "torch.float64"
+```
+
+Verified before launch: `param dtype = torch.float64`, and the loader
+logged "Using float64 for MACECalculator". Without this check the run
+would silently produce float32 numbers under a float64 label -- exactly
+the failure PR #17 fixes.
+
+## Result
+
+4/4 candidates `status=ok`. gamma_int = 0.0616 J/m^2 for all four
+(identical to the fourth decimal), against 0.0617 for the same four
+candidates in float32.
+
+Duration: 6 min 19 s (the float32 batch needed about 3 min for the same
+four candidates).
+
+## Environment
+
+Identical to ../environment.lock.yml: Python 3.13.14, torch 2.14.1+cpu,
+mace-torch 0.3.17, ase 3.29.0, numpy 2.5.4, pymatgen 2026.10.24 on
+Windows 11; MACE-MP-0 medium, weight sha256 01bfe22100139f...5845.

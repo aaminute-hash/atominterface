@@ -373,9 +373,44 @@ error, not of a physical split, model error, or a code bug. Relaxation
 steps went 49–53 → 71–75, none hitting `max_steps = 200`. γ_surf_Cu
 and γ_surf_Ni also moved, but by two orders of magnitude less
 (0.093476 → 0.093472 and 0.119728 → 0.119714 eV/Å²) and remain
-near-identical across the 10 candidates. **Still open:** a float64
-control run (entry point available since v0.2.1, see §12) has not been
-run.
+near-identical across the 10 candidates.
+
+### 8.1 float64 control: precision is not the bottleneck
+
+The convergence result above says the residual is numerical, but not
+*which* numerical limit binds. A float64 control separates the two
+candidates: relaxation convergence versus float32 round-off. Same four
+candidates as the A cluster above, same `fmax = 0.01`, precision the only
+variable ([data](validation/cu_ni_001_multi_candidate/float64_control/)):
+
+| configuration | γ_int (rank 1–4) |
+|---|---|
+| float32, `fmax = 0.01` | 0.0617 J/m² |
+| **float64, `fmax = 0.01`** | **0.0616 J/m²** |
+| float32, `fmax = 0.002` | 0.0567 J/m² |
+
+Double precision moves γ_int by 0.0001 J/m²; tightening the force gate
+moves it by 0.0050 J/m² — fifty times more. **The +0.005 J/m² bias is
+therefore convergence, not round-off**, confirmed independently of the
+fmax experiment. Three separate lines of evidence now agree: the fmax
+sweep, the monotone displacement signature, and this exclusion of
+precision.
+
+Practical consequence: reproducing this benchmark in float32 with
+`--fmax 0.002` is sufficient. float64 costs about twice the relaxation
+time (6 min 19 s versus about 3 min for the same four candidates) for a
+0.0001 J/m² gain, and is only worth enabling when a geometry-optimised
+reference value is the goal. γ_Cu and γ_Ni never needed it: they are
+differences of large, similarly-scaled terms, which is why the force gate
+affected them two orders of magnitude less than γ_int.
+
+Note on the code this control ran under: `--dtype` (PR #16) and the
+backend kwarg fix (PR #17) were still open, so the run used their
+conflict-free merge, detached HEAD `c750688` — equivalent to `main` once
+both are merged. A pre-flight asserted the model parameters really were
+`torch.float64` before the run started; see the archive's
+`provenance_extra.yaml`. On v0.2.1 itself the flag is silently inert
+(§12).
 
 ## 9. Why γ_int is the weakest number here
 
