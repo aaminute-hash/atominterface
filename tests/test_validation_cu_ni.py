@@ -236,7 +236,7 @@ def test_coherent_reference_carries_the_film_strain_energy(example03):
     """
     pytest.importorskip("mace")
     substrate, film = _cu_ni_bulks()
-    calculator = example03._make_calculator("mace", "cpu")
+    calculator = example03._make_calculator("mace", "cpu", "float32")
     substrate_atoms = example03._to_ase(substrate)
     film_atoms = example03._to_ase(film)
 
