@@ -16,16 +16,25 @@ one calculator setting (same backend, same device) for every term:
   5. guarded relaxation of both reference slabs and the interface
   6. termination energies, then the interface formation energy
 
+Every candidate kept by ``--max-candidates`` gets its own ledger row: the
+whole chain runs per candidate and each one is judged on its own, so a
+failure in the middle of the list is recorded as a failed row instead of
+silently dropping the rest.
+
 Outputs (in --outdir, default outputs/energy_cu_ni):
 
-  candidates.csv   one-row ledger with energy-validity and OOD diagnostics
+  candidates.csv   one row per candidate, with energy-validity and OOD
+                   diagnostics; failed candidates keep their row and
+                   structures but leave the gamma cells empty
   metadata.yaml    provenance: backend identity, seed, validity, artifact hash
-  *.extxyz         final interface, reference slabs and bulk inputs
+  <rank>_*.extxyz  final interface and reference slabs, one set per candidate
+  bulk_*.extxyz    bulk inputs (shared by every candidate)
 
 Gamma values are emitted only when every pristine/coherent bulk reference
 energy is finite and both reference slabs plus the interface pass finite
-energy/force, convergence and OOD checks. Invalid runs keep their diagnostic
-row and structures, leave gamma cells empty, and exit non-zero. A zero
+energy/force, convergence and OOD checks. Invalid candidates keep their
+diagnostic row and structures, leave gamma cells empty, and make the run
+exit non-zero while the successful candidates still ship. A zero
 ``ood_score`` with ``committee_enabled=false`` means no committee was queried.
 
 The dummy backend runs the whole chain as a wiring self-test, but its
@@ -51,6 +60,7 @@ import argparse
 import csv
 import sys
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -79,6 +89,16 @@ GAP = 2.0
 SUBSTRATE_MILLER = (0, 0, 1)
 FILM_MILLER = (0, 0, 1)
 
+#: Per-candidate ledger status. ``failed`` rows keep their diagnostics but
+#: never carry a gamma -- see :meth:`EnergyLedger.to_row`.
+STATUS_OK = "ok"
+STATUS_FAILED = "failed"
+
+#: Gap (A) that separates two atomic planes when counting slab layers. Far
+#: below the ~1.8 A (001) interlayer spacing of Cu/Ni and far above
+#: relaxation noise, so the count is stable before and after relaxation.
+LAYER_GAP_A = 0.75
+
 CSV_FIELDS = [
     "rank",
     "interface_id",
@@ -87,7 +107,15 @@ CSV_FIELDS = [
     "sub_termination",
     "film_termination",
     "area_A2",
+    "area_source",
+    "area_sub_A2",
+    "area_film_A2",
+    "area_consistent",
     "n_atoms",
+    "n_layers_sub",
+    "n_layers_film",
+    "vacuum_A",
+    "min_thickness_A",
     "E_bulk_sub_ev_per_atom",
     "E_bulk_film_ev_per_atom",
     "E_bulk_sub_coh_ev_per_atom",
@@ -100,12 +128,15 @@ CSV_FIELDS = [
     "gamma_eV_per_A2",
     "gamma_J_per_m2",
     "valid",
+    "status",
+    "error_reason",
     "converged",
     "energies_finite",
     "slab_sub_valid",
     "slab_film_valid",
     "interface_valid",
     "invalid_reasons",
+    "reference_state",
     "committee_enabled",
     "ood_monitoring",
     "ood_score",
@@ -114,6 +145,148 @@ CSV_FIELDS = [
     "backend",
     "model_hash",
 ]
+
+
+def _cell(value: float | None, digits: int = 6) -> str:
+    """One ledger number as CSV text; ``None`` stays blank (fail-closed)."""
+    return "" if value is None else f"{value:.{digits}f}"
+
+
+@dataclass
+class EnergyLedger:
+    """One candidate's complete energy ledger.
+
+    The ledger used to be a handful of loose locals inside ``main()``,
+    which is why only the first candidate could ever be reported.  As a
+    record it can be produced per candidate and judged on its own:
+    ``status`` is ``ok`` or ``failed``, and a failed ledger keeps every
+    diagnostic while leaving all gamma fields ``None`` so :meth:`to_row`
+    writes them blank rather than as a plausible-looking zero.
+
+    ``relax_*`` carry the ``RelaxResult`` objects out of the evaluation
+    purely so the relaxed structures can be written; they are not part of
+    the CSV contract.
+    """
+
+    rank: int = 0
+    interface_id: str = ""
+    substrate: str = ""
+    film: str = ""
+    sub_termination: str = ""
+    film_termination: str = ""
+
+    area_a2: float = 0.0
+    area_source: str = ""
+    area_sub_a2: float | None = None
+    area_film_a2: float | None = None
+    area_consistent: bool | None = None
+    n_atoms: int = 0
+    n_layers_sub: int = 0
+    n_layers_film: int = 0
+    vacuum_a: float = 0.0
+    min_thickness_a: float = 0.0
+
+    n_bulk_sub: int = 0
+    n_bulk_film: int = 0
+    e_bulk_sub: float | None = None
+    e_bulk_film: float | None = None
+    e_bulk_sub_coh: float | None = None
+    e_bulk_film_coh: float | None = None
+    e_slab_sub: float | None = None
+    e_slab_film: float | None = None
+    e_interface: float | None = None
+
+    gamma_sub: float | None = None
+    gamma_film: float | None = None
+    gamma_int: float | None = None
+    gamma_int_j_m2: float | None = None
+    reference_state: str = ""
+
+    converged: bool = False
+    energies_finite: bool = False
+    slab_sub_valid: bool = False
+    slab_film_valid: bool = False
+    interface_valid: bool = False
+    committee_enabled: bool = False
+    ood_monitoring: str = ""
+    ood_score: float = 0.0
+    ood_step: int = -1
+    ood_triggered: bool = False
+
+    status: str = STATUS_FAILED
+    error_reason: str = ""
+
+    backend: str = ""
+    model_hash: str = ""
+
+    relax_sub: object | None = None
+    relax_film: object | None = None
+    relax_interface: object | None = None
+
+    def to_row(self) -> dict[str, str]:
+        """CSV row for this candidate; blank wherever a value is missing."""
+        return {
+            "rank": str(self.rank),
+            "interface_id": self.interface_id,
+            "substrate": self.substrate,
+            "film": self.film,
+            "sub_termination": self.sub_termination,
+            "film_termination": self.film_termination,
+            "area_A2": f"{self.area_a2:.4f}",
+            "area_source": self.area_source,
+            "area_sub_A2": _cell(self.area_sub_a2, 4),
+            "area_film_A2": _cell(self.area_film_a2, 4),
+            "area_consistent": "" if self.area_consistent is None else str(self.area_consistent),
+            "n_atoms": str(self.n_atoms),
+            "n_layers_sub": str(self.n_layers_sub),
+            "n_layers_film": str(self.n_layers_film),
+            "vacuum_A": f"{self.vacuum_a:.4f}",
+            "min_thickness_A": f"{self.min_thickness_a:.4f}",
+            "E_bulk_sub_ev_per_atom": _cell(
+                None
+                if self.e_bulk_sub is None or not self.n_bulk_sub
+                else self.e_bulk_sub / self.n_bulk_sub
+            ),
+            "E_bulk_film_ev_per_atom": _cell(
+                None
+                if self.e_bulk_film is None or not self.n_bulk_film
+                else self.e_bulk_film / self.n_bulk_film
+            ),
+            "E_bulk_sub_coh_ev_per_atom": _cell(
+                None
+                if self.e_bulk_sub_coh is None or not self.n_bulk_sub
+                else self.e_bulk_sub_coh / self.n_bulk_sub
+            ),
+            "E_bulk_film_coh_ev_per_atom": _cell(
+                None
+                if self.e_bulk_film_coh is None or not self.n_bulk_film
+                else self.e_bulk_film_coh / self.n_bulk_film
+            ),
+            "E_slab_sub_ev": _cell(self.e_slab_sub),
+            "E_slab_film_ev": _cell(self.e_slab_film),
+            "E_interface_ev": _cell(self.e_interface),
+            "gamma_surf_sub_eV_A2": _cell(self.gamma_sub),
+            "gamma_surf_film_eV_A2": _cell(self.gamma_film),
+            "gamma_eV_per_A2": _cell(self.gamma_int),
+            "gamma_J_per_m2": _cell(self.gamma_int_j_m2, digits=4),
+            "valid": str(self.status == STATUS_OK),
+            "status": self.status,
+            "error_reason": self.error_reason,
+            "converged": str(self.converged),
+            "energies_finite": str(self.energies_finite),
+            "slab_sub_valid": str(self.slab_sub_valid),
+            "slab_film_valid": str(self.slab_film_valid),
+            "interface_valid": str(self.interface_valid),
+            "invalid_reasons": self.error_reason,
+            "reference_state": self.reference_state,
+            "committee_enabled": str(self.committee_enabled),
+            "ood_monitoring": self.ood_monitoring,
+            "ood_score": f"{self.ood_score:.6f}",
+            "ood_step": str(self.ood_step),
+            "ood_triggered": str(self.ood_triggered),
+            "backend": self.backend,
+            "model_hash": self.model_hash,
+        }
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -277,12 +450,74 @@ def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
     return float(centre - (lower - upper) ** 2 / (8.0 * curvature))
 
 
-def _build_candidate(substrate, film, args: argparse.Namespace):
-    """First coherent candidate plus the match its reference slabs reuse.
+def _count_layers(atoms) -> int:
+    """Number of atomic planes stacked along the slab normal.
 
-    ``build_all()`` consumed the match list; ``_match()`` re-derives it
-    deterministically (same slabs, same ranking), so the reference slabs
-    share the candidate's supercell and strain exactly.
+    Counted by splitting the sorted z coordinates wherever the gap
+    exceeds :data:`LAYER_GAP_A`; see that constant for the margin on
+    both sides.  The reference boards are counted before relaxation, so
+    the number is a property of the cut and not of the optimizer.
+    """
+    z = np.unique(np.round(np.asarray(atoms.positions)[:, 2], 3))
+    if z.size == 0:
+        return 0
+    return 1 + int(np.count_nonzero(np.diff(z) > LAYER_GAP_A))
+
+
+def _area_fields(candidate) -> tuple[str, float, float, bool | None]:
+    """Interface-area provenance for one candidate's ledger.
+
+    ``area_source`` / ``area_sub_A2`` / ``area_film_A2`` /
+    ``area_consistent`` are contributed by the ``fix/interface-area-policy``
+    branch.  Until that lands the reads fall back to ``candidate.area`` and
+    leave the consistency flag empty, so this branch does not depend on the
+    other PR's merge order -- merging it makes the real values appear here
+    with no further change.
+    """
+
+    def _read(name: str, default):
+        value = getattr(candidate, name, None)
+        if value is None:
+            value = candidate.metadata.get(name)
+        return default if value is None else value
+
+    area_sub = float(_read("area_sub_A2", candidate.area))
+    area_film = float(_read("area_film_A2", candidate.area))
+    consistent = _read("area_consistent", None)
+    source = str(_read("area_source", "candidate.area"))
+    return source, area_sub, area_film, None if consistent is None else bool(consistent)
+
+
+def _match_for(candidate):
+    """Rebuild the lattice match a candidate was assembled from.
+
+    ``build_all()`` enumerates match x substrate-termination x
+    film-termination and truncates at ``max_candidates``, so the Nth
+    candidate is *not* in general the Nth lattice match: with more than one
+    termination per side several candidates share one match, and ``zip``
+    would silently pair the rest against the wrong supercell.  The pairing
+    has to come from the candidate itself, and ``_to_candidate`` already
+    copies every descriptor the reference slabs need into the metadata
+    (``substrate_supercell``, ``film_supercell``, ``match_area_ang2``,
+    ``mismatch_stretch``, ``mismatch_shear``).
+    """
+    from atominterface.builders.coherent import _MatchInfo
+
+    meta = candidate.metadata
+    return _MatchInfo(
+        match_area=float(meta["match_area_ang2"]),
+        substrate_supercell=meta["substrate_supercell"],
+        film_supercell=meta["film_supercell"],
+        strain=float(meta["mismatch_stretch"]),
+        shear_strain=float(meta["mismatch_shear"]),
+    )
+
+
+def _build_candidates(substrate, film, args: argparse.Namespace):
+    """Every coherent candidate kept by ``--max-candidates``, plus the config.
+
+    The whole point of the ledger is that it covers this whole list, not
+    just its head.
     """
     from atominterface.builders import CoherentInterfaceBuilder, CoherentInterfaceConfig
 
@@ -296,12 +531,7 @@ def _build_candidate(substrate, film, args: argparse.Namespace):
         max_candidates=args.max_candidates,
     )
     builder = CoherentInterfaceBuilder(substrate=substrate, film=film, config=config)
-    candidates = builder.build()
-    if not candidates:
-        return None, None, config
-    if len(candidates) > 1:
-        print(f"note: {len(candidates)} candidate(s) kept; the ledger covers the first one.")
-    return candidates[0], builder._match()[0], config
+    return builder.build(), config
 
 
 def _reference_slabs(substrate, film, config, match, candidate):
@@ -404,147 +634,84 @@ def _gammas(
     return area, gamma_sub, gamma_film, gamma_int
 
 
-def _identity(args: argparse.Namespace) -> tuple[str, str]:
-    """Backend identity string and version, for provenance and the CSV."""
-    from atominterface.backends import model_identity_for_meta, resolve_model_meta
+def _reference_state(e_bulk_sub, e_bulk_film, e_bulk_sub_coh, e_bulk_film_coh) -> str:
+    """Which bulk reference the ledger's termination energies rest on.
 
-    identity = model_identity_for_meta(args.backend, device=args.device)
-    backend_version = resolve_model_meta(args.backend, device=args.device)["backend_version"]
-    return identity, backend_version
-
-
-def _write(path: Path, atoms) -> None:
-    """Write one extxyz with canonical array order (byte-stable layout).
-
-    pymatgen site properties reach ``atoms.arrays`` in set-iteration
-    order; without the normalisation the extxyz column order -- and
-    with it the file bytes -- would drift between processes.
+    ``strained-coherent`` is the reference that removes the ``n *
+    dE_strain`` term (see :func:`_coherent_bulk_energy`); ``pristine``
+    means only the unstrained bulk energies are available, so no coherent
+    correction could be applied.  Empty when neither pair survived.
     """
-    from atominterface.io import canonicalize_arrays
-
-    canonicalize_arrays(atoms)
-    ase_write(path, atoms)
-
-
-def _jsonable(value):
-    """argparse values -> YAML/JSON-safe primitives (Path -> str)."""
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    return value
+    if e_bulk_sub_coh is not None and e_bulk_film_coh is not None:
+        return "strained-coherent"
+    if e_bulk_sub is not None and e_bulk_film is not None:
+        return "pristine"
+    return ""
 
 
-def _sha256_file(path: Path) -> str:
-    """Full SHA-256 hex digest of an artifact file."""
-    from atominterface.provenance import hash_bytes
-
-    return hash_bytes(path.read_bytes())
-
-
-def _write_outputs(
+def _evaluate_candidate(  # noqa: PLR0912, PLR0915
     *,
-    outdir: Path,
-    row: dict,
-    relax_sub,
-    relax_film,
-    relax_interface,
-    bulk_sub_measured,
-    bulk_film_measured,
+    rank: int,
+    candidate,
+    match,
+    config,
+    substrate,
+    film,
+    substrate_atoms,
+    film_atoms,
+    calculator,
+    e_bulk_sub: float | None,
+    e_bulk_film: float | None,
+    setup_errors: list[str],
     identity: str,
-    backend_version: str,
+    identity_valid: bool,
     args: argparse.Namespace,
-) -> Path:
-    """Write candidates.csv, the relaxed structures and metadata.yaml."""
-    from atominterface.provenance import build_meta, write_metadata
+    outdir: Path,
+) -> EnergyLedger:
+    """Run the whole energy chain for one candidate.
 
-    csv_path = outdir / "candidates.csv"
-    with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        writer.writerows([row])
-
-    _write(outdir / "interface_relaxed.extxyz", relax_interface.atoms)
-    _write(outdir / "slab_sub_relaxed.extxyz", relax_sub.atoms)
-    _write(outdir / "slab_film_relaxed.extxyz", relax_film.atoms)
-    _write(outdir / "bulk_sub.extxyz", bulk_sub_measured)
-    _write(outdir / "bulk_film.extxyz", bulk_film_measured)
-
-    meta = build_meta(
-        backend=args.backend,
-        backend_version=backend_version,
-        model_hash=identity,
-        seed=SEED,
-        cli_args={key: _jsonable(value) for key, value in vars(args).items()},
-        artifacts={"candidates.csv": _sha256_file(csv_path)},
-        extra={
-            "valid": row["valid"] == "True",
-            "invalid_reasons": row["invalid_reasons"],
-            "committee_enabled": row["committee_enabled"] == "True",
-            "ood_monitoring": row["ood_monitoring"],
-        },
-    )
-    write_metadata(meta, outdir / "metadata.yaml")
-    return csv_path
-
-
-def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
-    """Run the Cu/Ni interface energy ledger; returns a process exit code."""
+    Every candidate is judged on its own: a failure anywhere in its chain
+    marks *this* ledger ``failed`` with an explicit ``error_reason`` and
+    leaves its gamma fields ``None``, while the other candidates still
+    ship.  ``setup_errors`` holds the run-wide failures (calculator, bulk
+    single points, model identity) and is folded into every candidate's
+    reason, because those genuinely invalidate all of them.
+    """
     from atominterface.physics import EV_A2_TO_J_M2
     from atominterface.relax import RelaxResult
 
-    args = _parse_args(argv)
-    np.random.seed(SEED)
-
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    substrate, film = _load_bulks()
-    substrate_atoms = _to_ase(substrate)
-    film_atoms = _to_ase(film)
-    print("== Cu(001) | Ni(001) interface formation energy ==")
-    print(f"substrate: Cu fcc, a={np.linalg.norm(substrate_atoms.cell[0]):.3f} A")
-    print(f"film     : Ni fcc, a={np.linalg.norm(film_atoms.cell[0]):.3f} A")
-
-    candidate, match, config = _build_candidate(substrate, film, args)
-    if candidate is None:
-        print("no coherent candidate under the current tolerances")
-        return 1
-    print(f"candidate: {candidate.interface_id}")
-    print(
-        f"          area={candidate.area:.2f} A^2, {candidate.total_atoms} atoms, "
-        f"mismatch={candidate.metadata['mismatch']:.4f}"
-    )
-
-    errors: list[str] = []
+    errors: list[str] = list(setup_errors)
 
     def record_error(stage: str, exc: Exception) -> None:
         message = f"{stage}: {type(exc).__name__}: {exc}"
         errors.append(message)
         print(f"invalid: {message}")
 
-    calculator = None
-    try:
-        calculator = _make_calculator(args.backend, args.device)
-    except Exception as exc:  # noqa: BLE001
-        record_error("calculator", exc)
-    print(f"backend  : {args.backend} (device {args.device})")
+    ledger = EnergyLedger(
+        rank=rank,
+        interface_id=candidate.interface_id,
+        substrate=candidate.substrate_formula,
+        film=candidate.film_formula,
+        sub_termination=candidate.substrate_termination,
+        film_termination=candidate.film_termination,
+        area_a2=float(candidate.area),
+        n_atoms=int(candidate.total_atoms),
+        vacuum_a=float(config.vacuum_thickness),
+        min_thickness_a=float(config.min_thickness),
+        n_bulk_sub=len(substrate_atoms),
+        n_bulk_film=len(film_atoms),
+        e_bulk_sub=e_bulk_sub,
+        e_bulk_film=e_bulk_film,
+        backend=args.backend,
+        model_hash=identity,
+    )
+    ledger.area_source, ledger.area_sub_a2, ledger.area_film_a2, ledger.area_consistent = (
+        _area_fields(candidate)
+    )
 
-    e_bulk_sub = None
-    e_bulk_film = None
     e_bulk_sub_coh = None
     e_bulk_film_coh = None
-    bulk_sub_measured = substrate_atoms.copy()
-    bulk_film_measured = film_atoms.copy()
     if calculator is not None:
-        try:
-            e_bulk_sub, bulk_sub_measured = _single_point(substrate_atoms, calculator)
-        except Exception as exc:  # noqa: BLE001
-            record_error("bulk_sub_pristine", exc)
-        try:
-            e_bulk_film, bulk_film_measured = _single_point(film_atoms, calculator)
-        except Exception as exc:  # noqa: BLE001
-            record_error("bulk_film_pristine", exc)
         try:
             e_bulk_sub_coh = _coherent_bulk_energy(
                 substrate_atoms, float(candidate.strain_substrate), calculator
@@ -557,6 +724,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
             )
         except Exception as exc:  # noqa: BLE001
             record_error("bulk_film_coherent", exc)
+    ledger.e_bulk_sub_coh = e_bulk_sub_coh
+    ledger.e_bulk_film_coh = e_bulk_film_coh
 
     references_ready = True
     try:
@@ -566,6 +735,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
         references_ready = False
         reference_sub = substrate_atoms.copy()
         reference_film = film_atoms.copy()
+    ledger.n_layers_sub = _count_layers(reference_sub)
+    ledger.n_layers_film = _count_layers(reference_film)
 
     def invalid_relax(atoms, message: str) -> RelaxResult:
         return RelaxResult(
@@ -609,15 +780,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
             errors.append(f"{label}: {result.exception}")
         errors.extend(f"{label}: {reason}" for reason in result.reasons if reason)
 
-    identity = ""
-    backend_version = ""
-    identity_valid = True
-    try:
-        identity, backend_version = _identity(args)
-    except Exception as exc:  # noqa: BLE001
-        record_error("model_identity", exc)
-        identity_valid = False
-
     required_energies = (e_bulk_sub, e_bulk_film, e_bulk_sub_coh, e_bulk_film_coh)
     relaxation_valid = all(result.valid for result in relaxations.values())
     chain_valid = (
@@ -628,13 +790,12 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
         and all(value is not None and np.isfinite(value) for value in energies)
     )
 
-    area = float(candidate.area)
     gamma_sub = None
     gamma_film = None
     gamma_int = None
     if chain_valid:
         try:
-            area, gamma_sub, gamma_film, gamma_int = _gammas(
+            _area, gamma_sub, gamma_film, gamma_int = _gammas(
                 candidate=candidate,
                 substrate_atoms=substrate_atoms,
                 film_atoms=film_atoms,
@@ -649,77 +810,311 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
         except Exception as exc:  # noqa: BLE001
             record_error("gamma", exc)
             gamma_sub = gamma_film = gamma_int = None
-    valid = chain_valid and gamma_int is not None
+    valid = bool(chain_valid and gamma_int is not None)
     if not valid and not errors:
         errors.append("energy chain failed validity checks")
-    errors = list(dict.fromkeys(errors))
 
-    def cell(value: float | None, digits: int = 6) -> str:
-        return "" if value is None else f"{value:.{digits}f}"
+    ledger.e_slab_sub, ledger.e_slab_film, ledger.e_interface = energies
+    ledger.gamma_sub = gamma_sub
+    ledger.gamma_film = gamma_film
+    ledger.gamma_int = gamma_int
+    ledger.gamma_int_j_m2 = None if gamma_int is None else gamma_int * EV_A2_TO_J_M2
+    ledger.reference_state = _reference_state(
+        e_bulk_sub, e_bulk_film, e_bulk_sub_coh, e_bulk_film_coh
+    )
+    ledger.status = STATUS_OK if valid else STATUS_FAILED
+    ledger.error_reason = "; ".join(dict.fromkeys(errors))
 
-    ood_result = max(relaxations.values(), key=lambda result: result.max_ood_score)
-    ood_triggered = any(result.ood_triggered for result in relaxations.values())
-    committee_enabled = any(
-        bool(result.metadata.get("committee_enabled", False)) for result in relaxations.values()
-    )
-    monitoring_modes = sorted(
-        {str(result.metadata.get("ood_monitoring", "unknown")) for result in relaxations.values()}
-    )
-    all_energies_finite = all(
+    ledger.slab_sub_valid = bool(relax_sub.valid)
+    ledger.slab_film_valid = bool(relax_film.valid)
+    ledger.interface_valid = bool(relax_interface.valid)
+    ledger.converged = all(result.converged for result in relaxations.values())
+    ledger.energies_finite = all(
         value is not None and np.isfinite(value) for value in required_energies
     ) and all(result.energies_finite for result in relaxations.values())
-    converged = all(result.converged for result in relaxations.values())
-    e_slab_sub, e_slab_film, e_interface = energies
+    ledger.relax_sub = relax_sub
+    ledger.relax_film = relax_film
+    ledger.relax_interface = relax_interface
 
-    row = {
-        "rank": 1,
-        "interface_id": candidate.interface_id,
-        "substrate": candidate.substrate_formula,
-        "film": candidate.film_formula,
-        "sub_termination": candidate.substrate_termination,
-        "film_termination": candidate.film_termination,
-        "area_A2": f"{area:.4f}",
-        "n_atoms": candidate.total_atoms,
-        "E_bulk_sub_ev_per_atom": cell(
-            None if e_bulk_sub is None else e_bulk_sub / len(substrate_atoms)
-        ),
-        "E_bulk_film_ev_per_atom": cell(
-            None if e_bulk_film is None else e_bulk_film / len(film_atoms)
-        ),
-        "E_bulk_sub_coh_ev_per_atom": cell(
-            None if e_bulk_sub_coh is None else e_bulk_sub_coh / len(substrate_atoms)
-        ),
-        "E_bulk_film_coh_ev_per_atom": cell(
-            None if e_bulk_film_coh is None else e_bulk_film_coh / len(film_atoms)
-        ),
-        "E_slab_sub_ev": cell(e_slab_sub),
-        "E_slab_film_ev": cell(e_slab_film),
-        "E_interface_ev": cell(e_interface),
-        "gamma_surf_sub_eV_A2": cell(gamma_sub),
-        "gamma_surf_film_eV_A2": cell(gamma_film),
-        "gamma_eV_per_A2": cell(gamma_int),
-        "gamma_J_per_m2": cell(None if gamma_int is None else gamma_int * EV_A2_TO_J_M2, digits=4),
-        "valid": str(valid),
-        "converged": str(converged),
-        "energies_finite": str(all_energies_finite),
-        "slab_sub_valid": str(relax_sub.valid),
-        "slab_film_valid": str(relax_film.valid),
-        "interface_valid": str(relax_interface.valid),
-        "invalid_reasons": "; ".join(errors),
-        "committee_enabled": str(committee_enabled),
-        "ood_monitoring": ",".join(monitoring_modes),
-        "ood_score": f"{ood_result.max_ood_score:.6f}",
-        "ood_step": str(ood_result.ood_step),
-        "ood_triggered": str(ood_triggered),
-        "backend": args.backend,
-        "model_hash": identity,
-    }
+    ood_worst = max(relaxations.values(), key=lambda result: result.max_ood_score)
+    ledger.ood_score = float(ood_worst.max_ood_score)
+    ledger.ood_step = int(ood_worst.ood_step)
+    ledger.ood_triggered = any(result.ood_triggered for result in relaxations.values())
+    ledger.committee_enabled = any(
+        bool(result.metadata.get("committee_enabled", False)) for result in relaxations.values()
+    )
+    ledger.ood_monitoring = ",".join(
+        sorted(
+            {
+                str(result.metadata.get("ood_monitoring", "unknown"))
+                for result in relaxations.values()
+            }
+        )
+    )
+    return ledger
+
+
+def _print_ledger(ledger: EnergyLedger, candidate) -> None:
+    """Console rendering of one candidate's ledger."""
+    from atominterface.physics import EV_A2_TO_J_M2
+
+    print(f"\n== energy ledger | rank {ledger.rank} ({ledger.status}) ==")
+    print(
+        f"E_bulk  sub (Cu): {_cell(ledger.e_bulk_sub, 4) or 'NA':>10} eV total | "
+        f"{_cell(None if ledger.e_bulk_sub is None else ledger.e_bulk_sub / ledger.n_bulk_sub, 4) or 'NA':>8} "
+        "eV/atom"
+    )
+    print(
+        f"strain in-plane : sub {float(candidate.strain_substrate):+.4%} | "
+        f"film {float(candidate.strain_film):+.4%}"
+    )
+    bulk_ready = all(
+        value is not None
+        for value in (
+            ledger.e_bulk_sub,
+            ledger.e_bulk_film,
+            ledger.e_bulk_sub_coh,
+            ledger.e_bulk_film_coh,
+        )
+    )
+    if bulk_ready:
+        print(
+            f"E_bulk coherent : sub {ledger.e_bulk_sub_coh / ledger.n_bulk_sub:8.4f} eV/atom "
+            f"({(ledger.e_bulk_sub_coh - ledger.e_bulk_sub) / ledger.n_bulk_sub:+.5f} vs pristine) | "
+            f"film {ledger.e_bulk_film_coh / ledger.n_bulk_film:8.4f} eV/atom "
+            f"({(ledger.e_bulk_film_coh - ledger.e_bulk_film) / ledger.n_bulk_film:+.5f} vs pristine)"
+        )
+    else:
+        print("E_bulk coherent : NA (invalid bulk reference)")
+    print(
+        f"E_slab  sub     : {_cell(ledger.e_slab_sub, 4) or 'NA':>10} eV "
+        f"(valid={ledger.slab_sub_valid})"
+    )
+    print(
+        f"E_slab film     : {_cell(ledger.e_slab_film, 4) or 'NA':>10} eV "
+        f"(valid={ledger.slab_film_valid})"
+    )
+    print(
+        f"E_interface     : {_cell(ledger.e_interface, 4) or 'NA':>10} eV "
+        f"(valid={ledger.interface_valid})"
+    )
+    if ledger.gamma_int is not None:
+        print(
+            f"gamma_surf Cu   : {ledger.gamma_sub:10.4f} eV/A^2 = "
+            f"{ledger.gamma_sub * EV_A2_TO_J_M2:7.3f} J/m^2"
+        )
+        print(
+            f"gamma_surf Ni   : {ledger.gamma_film:10.4f} eV/A^2 = "
+            f"{ledger.gamma_film * EV_A2_TO_J_M2:7.3f} J/m^2"
+        )
+        print(
+            f"gamma_int       : {ledger.gamma_int:10.4f} eV/A^2 = "
+            f"{ledger.gamma_int * EV_A2_TO_J_M2:7.3f} J/m^2"
+        )
+    else:
+        print("gamma_surf Cu   : NA (invalid energy chain)")
+        print("gamma_surf Ni   : NA (invalid energy chain)")
+        print("gamma_int       : NA (invalid energy chain)")
+    if ledger.error_reason:
+        print("invalid reasons : " + ledger.error_reason)
+    print(
+        f"OOD             : monitoring={ledger.ood_monitoring} "
+        f"committee_enabled={ledger.committee_enabled} score={ledger.ood_score:.3f} "
+        f"triggered={ledger.ood_triggered}"
+    )
+
+
+def _identity(args: argparse.Namespace) -> tuple[str, str]:
+    """Backend identity string and version, for provenance and the CSV."""
+    from atominterface.backends import model_identity_for_meta, resolve_model_meta
+
+    identity = model_identity_for_meta(args.backend, device=args.device)
+    backend_version = resolve_model_meta(args.backend, device=args.device)["backend_version"]
+    return identity, backend_version
+
+
+def _write(path: Path, atoms) -> None:
+    """Write one extxyz with canonical array order (byte-stable layout).
+
+    pymatgen site properties reach ``atoms.arrays`` in set-iteration
+    order; without the normalisation the extxyz column order -- and
+    with it the file bytes -- would drift between processes.
+    """
+    from atominterface.io import canonicalize_arrays
+
+    canonicalize_arrays(atoms)
+    ase_write(path, atoms)
+
+
+def _jsonable(value):
+    """argparse values -> YAML/JSON-safe primitives (Path -> str)."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _sha256_file(path: Path) -> str:
+    """Full SHA-256 hex digest of an artifact file."""
+    from atominterface.provenance import hash_bytes
+
+    return hash_bytes(path.read_bytes())
+
+
+def _write_outputs(
+    *,
+    outdir: Path,
+    ledgers: list[EnergyLedger],
+    bulk_sub_measured,
+    bulk_film_measured,
+    identity: str,
+    backend_version: str,
+    args: argparse.Namespace,
+) -> Path:
+    """Write candidates.csv, the relaxed structures and metadata.yaml.
+
+    Every candidate gets a row and its own set of relaxed structures; the
+    extxyz names carry the rank prefix so a multi-candidate run cannot
+    overwrite them one another.  The bulk single points are shared by all
+    candidates and stay unprefixed.
+    """
+    from atominterface.provenance import build_meta, write_metadata
+
+    csv_path = outdir / "candidates.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(ledger.to_row() for ledger in ledgers)
+
+    for ledger in ledgers:
+        prefix = f"{ledger.rank:02d}_"
+        _write(outdir / f"{prefix}interface_relaxed.extxyz", ledger.relax_interface.atoms)
+        _write(outdir / f"{prefix}slab_sub_relaxed.extxyz", ledger.relax_sub.atoms)
+        _write(outdir / f"{prefix}slab_film_relaxed.extxyz", ledger.relax_film.atoms)
+    _write(outdir / "bulk_sub.extxyz", bulk_sub_measured)
+    _write(outdir / "bulk_film.extxyz", bulk_film_measured)
+
+    meta = build_meta(
+        backend=args.backend,
+        backend_version=backend_version,
+        model_hash=identity,
+        seed=SEED,
+        cli_args={key: _jsonable(value) for key, value in vars(args).items()},
+        artifacts={"candidates.csv": _sha256_file(csv_path)},
+        extra={
+            "valid": all(ledger.status == STATUS_OK for ledger in ledgers),
+            "invalid_reasons": "; ".join(
+                ledger.error_reason for ledger in ledgers if ledger.error_reason
+            ),
+            "committee_enabled": any(ledger.committee_enabled for ledger in ledgers),
+            "ood_monitoring": ",".join(
+                sorted(
+                    {
+                        mode
+                        for ledger in ledgers
+                        for mode in ledger.ood_monitoring.split(",")
+                        if mode
+                    }
+                )
+            ),
+        },
+    )
+    write_metadata(meta, outdir / "metadata.yaml")
+    return csv_path
+
+
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
+    """Run the Cu/Ni interface energy ledger; returns a process exit code."""
+    args = _parse_args(argv)
+    np.random.seed(SEED)
+
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    substrate, film = _load_bulks()
+    substrate_atoms = _to_ase(substrate)
+    film_atoms = _to_ase(film)
+    print("== Cu(001) | Ni(001) interface formation energy ==")
+    print(f"substrate: Cu fcc, a={np.linalg.norm(substrate_atoms.cell[0]):.3f} A")
+    print(f"film     : Ni fcc, a={np.linalg.norm(film_atoms.cell[0]):.3f} A")
+
+    candidates, config = _build_candidates(substrate, film, args)
+    if not candidates:
+        print("no coherent candidate under the current tolerances")
+        return 1
+    print(f"candidates: {len(candidates)} kept (--max-candidates {args.max_candidates})")
+
+    # Run-wide failures: they invalidate every candidate, so they are
+    # folded into each ledger's error_reason rather than aborting the run.
+    setup_errors: list[str] = []
+
+    def record_error(stage: str, exc: Exception) -> None:
+        message = f"{stage}: {type(exc).__name__}: {exc}"
+        setup_errors.append(message)
+        print(f"invalid: {message}")
+
+    calculator = None
+    try:
+        calculator = _make_calculator(args.backend, args.device)
+    except Exception as exc:  # noqa: BLE001
+        record_error("calculator", exc)
+    print(f"backend  : {args.backend} (device {args.device})")
+
+    e_bulk_sub = None
+    e_bulk_film = None
+    bulk_sub_measured = substrate_atoms.copy()
+    bulk_film_measured = film_atoms.copy()
+    if calculator is not None:
+        try:
+            e_bulk_sub, bulk_sub_measured = _single_point(substrate_atoms, calculator)
+        except Exception as exc:  # noqa: BLE001
+            record_error("bulk_sub_pristine", exc)
+        try:
+            e_bulk_film, bulk_film_measured = _single_point(film_atoms, calculator)
+        except Exception as exc:  # noqa: BLE001
+            record_error("bulk_film_pristine", exc)
+
+    identity = ""
+    backend_version = ""
+    identity_valid = True
+    try:
+        identity, backend_version = _identity(args)
+    except Exception as exc:  # noqa: BLE001
+        record_error("model_identity", exc)
+        identity_valid = False
+
+    ledgers: list[EnergyLedger] = []
+    for rank, candidate in enumerate(candidates, start=1):
+        print(f"candidate {rank}/{len(candidates)}: {candidate.interface_id}")
+        print(
+            f"          area={candidate.area:.2f} A^2, {candidate.total_atoms} atoms, "
+            f"mismatch={candidate.metadata['mismatch']:.4f}"
+        )
+        ledger = _evaluate_candidate(
+            rank=rank,
+            candidate=candidate,
+            match=_match_for(candidate),
+            config=config,
+            substrate=substrate,
+            film=film,
+            substrate_atoms=substrate_atoms,
+            film_atoms=film_atoms,
+            calculator=calculator,
+            e_bulk_sub=e_bulk_sub,
+            e_bulk_film=e_bulk_film,
+            setup_errors=setup_errors,
+            identity=identity,
+            identity_valid=identity_valid,
+            args=args,
+            outdir=outdir,
+        )
+        ledgers.append(ledger)
+        _print_ledger(ledger, candidate)
+
     csv_path = _write_outputs(
         outdir=outdir,
-        row=row,
-        relax_sub=relax_sub,
-        relax_film=relax_film,
-        relax_interface=relax_interface,
+        ledgers=ledgers,
         bulk_sub_measured=bulk_sub_measured,
         bulk_film_measured=bulk_film_measured,
         identity=identity,
@@ -727,54 +1122,14 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
         args=args,
     )
 
-    print("\n== energy ledger ==")
-    print(
-        f"E_bulk  sub (Cu): {cell(e_bulk_sub, 4) or 'NA':>10} eV total | "
-        f"{cell(None if e_bulk_sub is None else e_bulk_sub / len(substrate_atoms), 4) or 'NA':>8} "
-        "eV/atom"
-    )
-    print(
-        f"strain in-plane : sub {float(candidate.strain_substrate):+.4%} | "
-        f"film {float(candidate.strain_film):+.4%}"
-    )
-    if all(value is not None for value in required_energies):
-        print(
-            f"E_bulk coherent : sub {e_bulk_sub_coh / len(substrate_atoms):8.4f} eV/atom "
-            f"({(e_bulk_sub_coh - e_bulk_sub) / len(substrate_atoms):+.5f} vs pristine) | "
-            f"film {e_bulk_film_coh / len(film_atoms):8.4f} eV/atom "
-            f"({(e_bulk_film_coh - e_bulk_film) / len(film_atoms):+.5f} vs pristine)"
-        )
-    else:
-        print("E_bulk coherent : NA (invalid bulk reference)")
-    print(f"E_slab  sub     : {cell(e_slab_sub, 4) or 'NA':>10} eV (valid={relax_sub.valid})")
-    print(f"E_slab film     : {cell(e_slab_film, 4) or 'NA':>10} eV (valid={relax_film.valid})")
-    print(
-        f"E_interface     : {cell(e_interface, 4) or 'NA':>10} eV (valid={relax_interface.valid})"
-    )
-    if valid:
-        print(
-            f"gamma_surf Cu   : {gamma_sub:10.4f} eV/A^2 = {gamma_sub * EV_A2_TO_J_M2:7.3f} J/m^2"
-        )
-        print(
-            f"gamma_surf Ni   : {gamma_film:10.4f} eV/A^2 = {gamma_film * EV_A2_TO_J_M2:7.3f} J/m^2"
-        )
-        print(
-            f"gamma_int       : {gamma_int:10.4f} eV/A^2 = {gamma_int * EV_A2_TO_J_M2:7.3f} J/m^2"
-        )
-    else:
-        print("gamma_surf Cu   : NA (invalid energy chain)")
-        print("gamma_surf Ni   : NA (invalid energy chain)")
-        print("gamma_int       : NA (invalid energy chain)")
-        print("invalid reasons : " + "; ".join(errors))
-    print(
-        f"OOD             : monitoring={row['ood_monitoring']} "
-        f"committee_enabled={committee_enabled} score={ood_result.max_ood_score:.3f} "
-        f"triggered={ood_triggered}"
-    )
+    failed = [ledger.rank for ledger in ledgers if ledger.status != STATUS_OK]
     print(f"\nWrote {csv_path}, metadata.yaml and structures to {outdir}/")
+    print(f"ledger   : {len(ledgers) - len(failed)}/{len(ledgers)} candidate(s) valid")
+    if failed:
+        print(f"invalid  : candidate rank(s) {', '.join(str(rank) for rank in failed)}")
     if args.backend == "dummy":
         print("note: dummy energies are not physical; the numbers only prove the chain.")
-    return 0 if valid else 2
+    return 0 if not failed else 2
 
 
 if __name__ == "__main__":
