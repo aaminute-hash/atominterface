@@ -25,7 +25,13 @@ Outputs (in --outdir, default outputs/energy_cu_ni):
 
   candidates.csv   one row per candidate, with energy-validity and OOD
                    diagnostics; failed candidates keep their row and
-                   structures but leave the gamma cells empty
+                   structures but leave the gamma cells empty.
+                   ``min_thickness_A`` records the shared --min-thickness,
+                   while ``min_thickness_substrate_A`` and
+                   ``min_thickness_film_A`` record the per-side values the
+                   slabs were actually cut at (each side falls back to the
+                   shared value when no override was given), so the layer
+                   counts always match a recorded thickness.
   metadata.yaml    provenance: backend identity, seed, validity, artifact hash
   <rank>_*.extxyz  final interface and reference slabs, one set per candidate
   bulk_*.extxyz    bulk inputs (shared by every candidate)
@@ -64,6 +70,7 @@ import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -74,6 +81,12 @@ try:
     from ase.io import write as ase_write
 except Exception as exc:  # pragma: no cover - ASE is a hard dependency
     sys.exit(f"[interface-energy] ASE is required: {exc}")
+
+if TYPE_CHECKING:
+    # Import-time only: the ledger fields below are annotated with it, and
+    # ``from __future__ import annotations`` keeps the annotation a string,
+    # so the demo never pays the relax-package import at module scope.
+    from atominterface.relax import RelaxResult
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 SUBSTRATE_FILE = "Cu_fcc.vasp"
@@ -118,6 +131,8 @@ CSV_FIELDS = [
     "n_layers_film",
     "vacuum_A",
     "min_thickness_A",
+    "min_thickness_substrate_A",
+    "min_thickness_film_A",
     "E_bulk_sub_ev_per_atom",
     "E_bulk_film_ev_per_atom",
     "E_bulk_sub_coh_ev_per_atom",
@@ -186,7 +201,15 @@ class EnergyLedger:
     n_layers_sub: int = 0
     n_layers_film: int = 0
     vacuum_a: float = 0.0
+    #: Shared --min-thickness (what a run without per-side overrides uses).
     min_thickness_a: float = 0.0
+    #: Resolved per-side thicknesses from ``config.slab_thicknesses()``:
+    #: the override when one was given, the shared value when it was not.
+    #: Recorded next to ``n_layers_sub`` / ``n_layers_film`` so a row can
+    #: never show a layer count generated from a different thickness than
+    #: the shared column reports.
+    min_thickness_substrate_a: float = 0.0
+    min_thickness_film_a: float = 0.0
 
     n_bulk_sub: int = 0
     n_bulk_film: int = 0
@@ -221,9 +244,9 @@ class EnergyLedger:
     backend: str = ""
     model_hash: str = ""
 
-    relax_sub: object | None = None
-    relax_film: object | None = None
-    relax_interface: object | None = None
+    relax_sub: RelaxResult | None = None
+    relax_film: RelaxResult | None = None
+    relax_interface: RelaxResult | None = None
 
     def to_row(self) -> dict[str, str]:
         """CSV row for this candidate; blank wherever a value is missing."""
@@ -244,6 +267,8 @@ class EnergyLedger:
             "n_layers_film": str(self.n_layers_film),
             "vacuum_A": f"{self.vacuum_a:.4f}",
             "min_thickness_A": f"{self.min_thickness_a:.4f}",
+            "min_thickness_substrate_A": f"{self.min_thickness_substrate_a:.4f}",
+            "min_thickness_film_A": f"{self.min_thickness_film_a:.4f}",
             "E_bulk_sub_ev_per_atom": _cell(
                 None
                 if self.e_bulk_sub is None or not self.n_bulk_sub
@@ -718,6 +743,11 @@ def _evaluate_candidate(  # noqa: PLR0912, PLR0915
 
     errors: list[str] = list(setup_errors)
 
+    # Resolved per-side thicknesses: each side is the per-side override
+    # when one was given and the shared --min-thickness when it was not,
+    # which is exactly the value the reference slabs are cut at.
+    sub_thickness, film_thickness = config.slab_thicknesses()
+
     def record_error(stage: str, exc: Exception) -> None:
         message = f"{stage}: {type(exc).__name__}: {exc}"
         errors.append(message)
@@ -734,6 +764,8 @@ def _evaluate_candidate(  # noqa: PLR0912, PLR0915
         n_atoms=int(candidate.total_atoms),
         vacuum_a=float(config.vacuum_thickness),
         min_thickness_a=float(config.min_thickness),
+        min_thickness_substrate_a=float(sub_thickness),
+        min_thickness_film_a=float(film_thickness),
         n_bulk_sub=len(substrate_atoms),
         n_bulk_film=len(film_atoms),
         e_bulk_sub=e_bulk_sub,
@@ -829,7 +861,10 @@ def _evaluate_candidate(  # noqa: PLR0912, PLR0915
     gamma_sub = None
     gamma_film = None
     gamma_int = None
-    if chain_valid:
+    # ``chain_valid`` already guarantees both coherent bulk energies are
+    # present; spelling the checks out lets the type checker narrow them
+    # from ``float | None`` to ``float`` for the call below.
+    if chain_valid and e_bulk_sub_coh is not None and e_bulk_film_coh is not None:
         try:
             _area, gamma_sub, gamma_film, gamma_int = _gammas(
                 candidate=candidate,
@@ -904,16 +939,15 @@ def _print_ledger(ledger: EnergyLedger, candidate) -> None:
         f"strain in-plane : sub {float(candidate.strain_substrate):+.4%} | "
         f"film {float(candidate.strain_film):+.4%}"
     )
-    bulk_ready = all(
-        value is not None
-        for value in (
-            ledger.e_bulk_sub,
-            ledger.e_bulk_film,
-            ledger.e_bulk_sub_coh,
-            ledger.e_bulk_film_coh,
-        )
-    )
-    if bulk_ready:
+    # Spelled out as one conjunction (rather than ``all(...)`` over a
+    # tuple) so the type checker narrows each field to ``float`` inside
+    # the branch that divides by the bulk atom counts.
+    if (
+        ledger.e_bulk_sub is not None
+        and ledger.e_bulk_film is not None
+        and ledger.e_bulk_sub_coh is not None
+        and ledger.e_bulk_film_coh is not None
+    ):
         print(
             f"E_bulk coherent : sub {ledger.e_bulk_sub_coh / ledger.n_bulk_sub:8.4f} eV/atom "
             f"({(ledger.e_bulk_sub_coh - ledger.e_bulk_sub) / ledger.n_bulk_sub:+.5f} vs pristine) | "
@@ -934,7 +968,13 @@ def _print_ledger(ledger: EnergyLedger, candidate) -> None:
         f"E_interface     : {_cell(ledger.e_interface, 4) or 'NA':>10} eV "
         f"(valid={ledger.interface_valid})"
     )
-    if ledger.gamma_int is not None:
+    # All three gammas are set (or cleared) together; guarding on each
+    # one keeps the multiplication below off a ``None`` operand.
+    if (
+        ledger.gamma_int is not None
+        and ledger.gamma_sub is not None
+        and ledger.gamma_film is not None
+    ):
         print(
             f"gamma_surf Cu   : {ledger.gamma_sub:10.4f} eV/A^2 = "
             f"{ledger.gamma_sub * EV_A2_TO_J_M2:7.3f} J/m^2"
@@ -995,7 +1035,11 @@ def _sha256_file(path: Path) -> str:
     """Full SHA-256 hex digest of an artifact file."""
     from atominterface.provenance import hash_bytes
 
-    return hash_bytes(path.read_bytes())
+    # Annotated local: when this script is type-checked on its own the
+    # package import resolves to ``Any``, and the annotation keeps the
+    # declared ``-> str`` honest instead of leaking ``Any`` outward.
+    digest: str = hash_bytes(path.read_bytes())
+    return digest
 
 
 def _write_outputs(
@@ -1025,9 +1069,17 @@ def _write_outputs(
 
     for ledger in ledgers:
         prefix = f"{ledger.rank:02d}_"
-        _write(outdir / f"{prefix}interface_relaxed.extxyz", ledger.relax_interface.atoms)
-        _write(outdir / f"{prefix}slab_sub_relaxed.extxyz", ledger.relax_sub.atoms)
-        _write(outdir / f"{prefix}slab_film_relaxed.extxyz", ledger.relax_film.atoms)
+        # A ledger that reaches this writer always carries its three
+        # relaxations; the ``None`` default only covers a ledger that was
+        # never evaluated, which has no relaxed structures to write.
+        for result, label in (
+            (ledger.relax_interface, "interface"),
+            (ledger.relax_sub, "slab_sub"),
+            (ledger.relax_film, "slab_film"),
+        ):
+            if result is None:
+                continue
+            _write(outdir / f"{prefix}{label}_relaxed.extxyz", result.atoms)
     _write(outdir / "bulk_sub.extxyz", bulk_sub_measured)
     _write(outdir / "bulk_film.extxyz", bulk_film_measured)
 

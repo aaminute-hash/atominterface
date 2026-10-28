@@ -499,7 +499,10 @@ def test_example_03_nonfinite_calculator_invalidates_gamma(
 # multi-candidate ledger: every candidate gets a row, judged on its own
 # ------------------------------------------------------------------
 def _run_multi(example03, outdir: Path, *extra: str) -> int:
-    return example03.main(
+    # Annotated local: the example03 fixture is dynamically imported, so
+    # ``example03.main`` is ``Any`` to the type checker; the annotation
+    # keeps the declared ``-> int`` from leaking that ``Any`` outward.
+    code: int = example03.main(
         [
             "--backend",
             "dummy",
@@ -512,6 +515,7 @@ def _run_multi(example03, outdir: Path, *extra: str) -> int:
             *extra,
         ]
     )
+    return code
 
 
 def test_example_03_ledgers_every_candidate(example03, tmp_path):
@@ -796,3 +800,55 @@ def test_example_03_default_knobs_leave_the_ledger_unchanged(example03, tmp_path
     assert row["n_layers_sub"] == "8"
     assert row["n_layers_film"] == "10"
     assert row["vacuum_A"] == "15.0000"
+
+
+def test_example_03_shared_thickness_matches_per_side_columns(example03, tmp_path):
+    """Without per-side overrides the per-side columns equal the shared value.
+
+    ``min_thickness_substrate_A`` / ``min_thickness_film_A`` record the
+    *resolved* thicknesses from ``config.slab_thicknesses()``; with no
+    override each side falls back to the shared ``--min-thickness``, so
+    all three columns must agree.
+    """
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    code = _run_multi(example03, outdir)
+
+    assert code == 0
+    row = _csv_row(outdir)
+    assert row["min_thickness_A"] == "14.4000"
+    assert row["min_thickness_substrate_A"] == "14.4000"
+    assert row["min_thickness_film_A"] == "14.4000"
+
+
+def test_example_03_per_side_thickness_columns(example03, tmp_path):
+    """Per-side overrides land in the CSV as resolved values.
+
+    The shared ``min_thickness_A`` keeps reporting ``--min-thickness``
+    (14.4 A), while the two per-side columns report what each side was
+    actually cut at -- 18.0 A on the substrate, the shared 14.4 A on the
+    film.  Before these columns existed the row showed
+    ``min_thickness_A=14.4`` next to ``n_layers_sub=10`` (a layer count
+    generated from 18.0 A), which no reader could reconcile.
+    """
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    code = _run_multi(
+        example03,
+        outdir,
+        "--min-thickness-substrate",
+        "18.0",
+        "--min-thickness-film",
+        "14.4",
+    )
+
+    assert code == 0
+    row = _csv_row(outdir)
+    assert row["min_thickness_A"] == "14.4000"
+    assert row["min_thickness_substrate_A"] == "18.0000"
+    assert row["min_thickness_film_A"] == "14.4000"
+    # Self-consistency: the substrate layer count follows the recorded
+    # per-side thickness (18.0 A cuts 10 Cu planes, the 14.4 A plateau
+    # cuts 8), while the film side keeps the 14.4 A count.
+    assert row["n_layers_sub"] == "10"
+    assert row["n_layers_film"] == "10"
