@@ -1,0 +1,33 @@
+tool: atominterface
+version: 0.2.1
+run_id: 4ae40498ff
+seed: 0
+backend: mace
+backend_version: 0.3.17
+model_hash: MACE-MP-0/medium@mace-torch:0.3.17:sha256:01bfe2210013
+units: eV_A
+cli_args:
+  backend: mace
+  device: cpu
+  dtype: float32
+  min_thickness: 18.0
+  min_thickness_substrate: null
+  min_thickness_film: null
+  vacuum: 15.0
+  max_candidates: 4
+  fmax: 0.01
+  max_steps: 200
+  outdir: F:/tmp/d1_thickness/thick_18.0_vac15
+artifacts:
+  candidates.csv: 394534cef4aa1ef8dda01d8f8d5117eb906d1bf5ecb6da90310e54e3cd60fd17
+env:
+  python: 3.13.14
+  platform: Windows-11-10.0.26340-SP0
+  ase: 3.29.0
+  pymatgen: unknown
+  torch: 2.14.1+cpu
+extra:
+  valid: true
+  invalid_reasons: ''
+  committee_enabled: false
+  ood_monitoring: heuristics_only

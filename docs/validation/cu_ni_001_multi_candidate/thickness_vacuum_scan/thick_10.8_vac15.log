@@ -1,0 +1,1107 @@
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_script.py:1491: FutureWarning: `torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+== Cu(001) | Ni(001) interface formation energy ==
+substrate: Cu fcc, a=3.615 A
+film     : Ni fcc, a=3.524 A
+candidates: 4 kept (--max-candidates 4)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+backend  : mace (device cpu)
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+candidate 1/4: coherent:(0, 0, 1)-(0, 0, 1):0-0:sub1_0_0_1-film1_0_0_1
+          area=6.53 A^2, 14 atoms, mismatch=0.0258
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:28:17      -23.285440        0.091501
+FIRE:    1 11:28:17      -23.285625        0.083974
+FIRE:    2 11:28:17      -23.285931        0.069671
+FIRE:    3 11:28:18      -23.286255        0.050009
+FIRE:    4 11:28:18      -23.286493        0.027066
+FIRE:    5 11:28:18      -23.286591        0.023199
+FIRE:    6 11:28:18      -23.286579        0.026913
+FIRE:    7 11:28:19      -23.286585        0.026563
+FIRE:    8 11:28:19      -23.286600        0.025859
+FIRE:    9 11:28:19      -23.286621        0.024829
+FIRE:   10 11:28:19      -23.286644        0.023492
+FIRE:   11 11:28:19      -23.286669        0.021888
+FIRE:   12 11:28:20      -23.286694        0.020049
+FIRE:   13 11:28:20      -23.286716        0.018029
+FIRE:   14 11:28:20      -23.286739        0.015655
+FIRE:   15 11:28:20      -23.286758        0.012986
+FIRE:   16 11:28:20      -23.286774        0.012785
+FIRE:   17 11:28:21      -23.286789        0.016006
+FIRE:   18 11:28:21      -23.286808        0.017993
+FIRE:   19 11:28:21      -23.286833        0.018282
+FIRE:   20 11:28:21      -23.286867        0.016485
+FIRE:   21 11:28:21      -23.286905        0.012383
+FIRE:   22 11:28:21      -23.286938        0.006182
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:28:22      -43.994274        0.712486
+FIRE:    1 11:28:23      -44.005810        0.679101
+FIRE:    2 11:28:23      -44.026104        0.612543
+FIRE:    3 11:28:23      -44.050316        0.513635
+FIRE:    4 11:28:24      -44.072872        0.383898
+FIRE:    5 11:28:24      -44.089367        0.248654
+FIRE:    6 11:28:24      -44.099136        0.384167
+FIRE:    7 11:28:24      -44.106087        0.463810
+FIRE:    8 11:28:24      -44.116112        0.463890
+FIRE:    9 11:28:25      -44.131546        0.360295
+FIRE:   10 11:28:25      -44.148674        0.285079
+FIRE:   11 11:28:25      -44.161854        0.340293
+FIRE:   12 11:28:25      -44.173851        0.279621
+FIRE:   13 11:28:25      -44.188137        0.183988
+FIRE:   14 11:28:25      -44.194550        0.161628
+FIRE:   15 11:28:26      -44.195435        0.141787
+FIRE:   16 11:28:26      -44.196747        0.105124
+FIRE:   17 11:28:26      -44.197834        0.057140
+FIRE:   18 11:28:26      -44.198227        0.036779
+FIRE:   19 11:28:26      -44.198238        0.035702
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+FIRE:   20 11:28:26      -44.198265        0.033549
+FIRE:   21 11:28:27      -44.198299        0.030434
+FIRE:   22 11:28:27      -44.198338        0.027816
+FIRE:   23 11:28:27      -44.198383        0.024926
+FIRE:   24 11:28:27      -44.198421        0.021623
+FIRE:   25 11:28:27      -44.198460        0.018019
+FIRE:   26 11:28:28      -44.198494        0.013829
+FIRE:   27 11:28:28      -44.198517        0.012769
+FIRE:   28 11:28:28      -44.198536        0.011050
+FIRE:   29 11:28:29      -44.198544        0.010987
+FIRE:   30 11:28:29      -44.198544        0.011903
+FIRE:   31 11:28:29      -44.198544        0.011668
+FIRE:   32 11:28:29      -44.198544        0.011185
+FIRE:   33 11:28:29      -44.198547        0.010475
+FIRE:   34 11:28:30      -44.198547        0.009552
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:28:30      -68.590530        0.712414
+FIRE:    1 11:28:31      -68.600784        0.678999
+FIRE:    2 11:28:31      -68.619125        0.612410
+FIRE:    3 11:28:32      -68.641792        0.513580
+FIRE:    4 11:28:32      -68.664413        0.384316
+FIRE:    5 11:28:32      -68.683250        0.278007
+FIRE:    6 11:28:33      -68.696770        0.380032
+FIRE:    7 11:28:33      -68.706390        0.455829
+FIRE:    8 11:28:33      -68.715675        0.444258
+FIRE:    9 11:28:34      -68.726143        0.323712
+FIRE:   10 11:28:34      -68.737198        0.296755
+FIRE:   11 11:28:34      -68.748322        0.353731
+FIRE:   12 11:28:35      -68.761787        0.294345
+FIRE:   13 11:28:35      -68.777802        0.263224
+FIRE:   14 11:28:35      -68.791672        0.267136
+FIRE:   15 11:28:36      -68.803055        0.199392
+FIRE:   16 11:28:36      -68.810196        0.151752
+FIRE:   17 11:28:36      -68.811684        0.135151
+FIRE:   18 11:28:37      -68.814125        0.116186
+FIRE:   19 11:28:37      -68.816803        0.114685
+FIRE:   20 11:28:38      -68.819199        0.111622
+FIRE:   21 11:28:38      -68.821236        0.106234
+FIRE:   22 11:28:38      -68.823120        0.097991
+FIRE:   23 11:28:39      -68.825012        0.090541
+FIRE:   24 11:28:39      -68.827110        0.077218
+FIRE:   25 11:28:40      -68.829384        0.071246
+FIRE:   26 11:28:41      -68.832115        0.085242
+FIRE:   27 11:28:42      -68.835602        0.069241
+FIRE:   28 11:28:42      -68.839340        0.057383
+FIRE:   29 11:28:43      -68.842316        0.063800
+FIRE:   30 11:28:43      -68.844933        0.071874
+FIRE:   31 11:28:44      -68.847610        0.058156
+FIRE:   32 11:28:44      -68.850410        0.061592
+FIRE:   33 11:28:45      -68.852707        0.065329
+FIRE:   34 11:28:45      -68.853554        0.051389
+FIRE:   35 11:28:46      -68.853844        0.041868
+FIRE:   36 11:28:46      -68.854240        0.026886
+FIRE:   37 11:28:47      -68.854546        0.032026
+FIRE:   38 11:28:47      -68.854721        0.036480
+FIRE:   39 11:28:47      -68.854820        0.026391
+FIRE:   40 11:28:48      -68.854889        0.026942
+FIRE:   41 11:28:48      -68.854904        0.026181
+FIRE:   42 11:28:48      -68.854942        0.024687
+FIRE:   43 11:28:49      -68.854988        0.022551
+FIRE:   44 11:28:49      -68.855042        0.019842
+FIRE:   45 11:28:49      -68.855095        0.016741
+FIRE:   46 11:28:50      -68.855148        0.013358
+FIRE:   47 11:28:50      -68.855179        0.009887
+
+== energy ledger | rank 1 (ok) ==
+E_bulk  sub (Cu):   -16.3376 eV total |  -4.0844 eV/atom
+strain in-plane : sub +0.0000% | film +2.5823%
+E_bulk coherent : sub  -4.0848 eV/atom (-0.00035 vs pristine) | film  -5.7204 eV/atom (+0.01057 vs pristine)
+E_slab  sub     :   -23.2869 eV (valid=True)
+E_slab film     :   -44.1985 eV (valid=True)
+E_interface     :   -68.8552 eV (valid=True)
+gamma_surf Cu   :     0.0935 eV/A^2 =   1.498 J/m^2
+gamma_surf Ni   :     0.1197 eV/A^2 =   1.918 J/m^2
+gamma_int       :     0.0036 eV/A^2 =   0.057 J/m^2
+OOD             : monitoring=heuristics_only committee_enabled=False score=0.000 triggered=False
+candidate 2/4: coherent:(0, 0, 1)-(0, 0, 1):0-0:sub1_0_0_2-film1_0_0_2
+          area=13.07 A^2, 28 atoms, mismatch=0.0258
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199modelF:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:29:03      -46.570877        0.091501
+FIRE:    1 11:29:04      -46.571247        0.083974
+FIRE:    2 11:29:04      -46.571857        0.069671
+FIRE:    3 11:29:04      -46.572506        0.050009
+FIRE:    4 11:29:05      -46.572983        0.027066
+FIRE:    5 11:29:05      -46.573177        0.023199
+FIRE:    6 11:29:05      -46.573154        0.026913
+FIRE:    7 11:29:06      -46.573166        0.026563
+FIRE:    8 11:29:06      -46.573196        0.025859
+FIRE:    9 11:29:07      -46.573235        0.024829
+FIRE:   10 11:29:08      -46.573284        0.023492
+FIRE:   11 11:29:08      -46.573334        0.021888
+FIRE:   12 11:29:09      -46.573383        0.020049
+FIRE:   13 11:29:10      -46.573429        0.018029
+FIRE:   14 11:29:10      -46.573475        0.015655
+FIRE:   15 11:29:11      -46.573509        0.012986
+FIRE:   16 11:29:11      -46.573544        0.012785
+FIRE:   17 11:29:11      -46.573574        0.016005
+FIRE:   18 11:29:12      -46.573612        0.017993
+FIRE:   19 11:29:12      -46.573662        0.018282
+FIRE:   20 11:29:13      -46.573730        0.016485
+FIRE:   21 11:29:13      -46.573807        0.012383
+FIRE:   22 11:29:13      -46.573872        0.006182
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:29:14      -87.988541        0.712486
+FIRE:    1 11:29:15      -88.011612        0.679101
+FIRE:    2 11:29:16      -88.052200        0.612543
+FIRE:    3 11:29:16      -88.100616        0.513635
+FIRE:    4 11:29:17      -88.145737        0.383898
+FIRE:    5 11:29:17      -88.178726        0.248654
+FIRE:    6 11:29:18      -88.198265        0.384167
+FIRE:    7 11:29:18      -88.212166        0.463811
+FIRE:    8 11:29:19      -88.232216        0.463890
+FIRE:    9 11:29:19      -88.263084        0.360308
+FIRE:   10 11:29:19      -88.297340        0.285079
+FIRE:   11 11:29:20      -88.323700        0.340295
+FIRE:   12 11:29:20      -88.347694        0.279622
+FIRE:   13 11:29:20      -88.376266        0.184000
+FIRE:   14 11:29:21      -88.389099        0.161617
+FIRE:   15 11:29:21      -88.390862        0.141785
+FIRE:   16 11:29:21      -88.393486        0.105125
+FIRE:   17 11:29:22      -88.395660        0.057141
+FIRE:   18 11:29:22      -88.396446        0.036775
+FIRE:   19 11:29:23      -88.396469        0.035694
+FIRE:   20 11:29:23      -88.396523        0.033553
+FIRE:   21 11:29:23      -88.396591        0.030434
+FIRE:   22 11:29:24      -88.396667        0.027828
+FIRE:   23 11:29:24      -88.396759        0.024924
+FIRE:   24 11:29:25      -88.396835        0.021633
+FIRE:   25 11:29:25      -88.396912        0.018019
+FIRE:   26 11:29:25      -88.396980        0.013831
+FIRE:   27 11:29:26      -88.397034        0.012770
+FIRE:   28 11:29:26      -88.397064        0.011047
+FIRE:   29 11:29:26      -88.397079        0.010983
+FIRE:   30 11:29:27      -88.397079        0.011903
+FIRE:   31 11:29:27      -88.397087        0.011669
+FIRE:   32 11:29:28      -88.397079        0.011185
+FIRE:   33 11:29:28      -88.397087        0.010476
+FIRE:   34 11:29:28      -88.397087        0.009552
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:29:29     -137.181015        0.712415
+FIRE:    1 11:29:30     -137.201523        0.678999
+FIRE:    2 11:29:31     -137.238205        0.612410
+FIRE:    3 11:29:32     -137.283539        0.513580
+FIRE:    4 11:29:33     -137.328781        0.384316
+FIRE:    5 11:29:33     -137.366455        0.278007
+FIRE:    6 11:29:34     -137.393494        0.380032
+FIRE:    7 11:29:34     -137.412735        0.455829
+FIRE:    8 11:29:35     -137.431320        0.444258
+FIRE:    9 11:29:36     -137.452240        0.323712
+FIRE:   10 11:29:36     -137.474350        0.296755
+FIRE:   11 11:29:37     -137.496597        0.353731
+FIRE:   12 11:29:38     -137.523529        0.294346
+FIRE:   13 11:29:38     -137.555557        0.263224
+FIRE:   14 11:29:40     -137.583298        0.267136
+FIRE:   15 11:29:40     -137.606064        0.199392
+FIRE:   16 11:29:41     -137.620361        0.151752
+FIRE:   17 11:29:42     -137.623322        0.135152
+FIRE:   18 11:29:44     -137.628204        0.116186
+FIRE:   19 11:29:46     -137.633560        0.114685
+FIRE:   20 11:29:47     -137.638367        0.111625
+FIRE:   21 11:29:49     -137.642426        0.106234
+FIRE:   22 11:29:50     -137.646194        0.097991
+FIRE:   23 11:29:53     -137.649979        0.090545
+FIRE:   24 11:29:55     -137.654175        0.077243
+FIRE:   25 11:29:56     -137.658722        0.071241
+FIRE:   26 11:29:58     -137.664185        0.085245
+FIRE:   27 11:30:00     -137.671158        0.069249
+FIRE:   28 11:30:02     -137.678635        0.057385
+FIRE:   29 11:30:05     -137.684586        0.063804
+FIRE:   30 11:30:07     -137.689819        0.071891
+FIRE:   31 11:30:07     -137.695190        0.058173
+FIRE:   32 11:30:08     -137.700775        0.061570
+FIRE:   33 11:30:09     -137.705368        0.065363
+FIRE:   34 11:30:10     -137.707062        0.051374
+FIRE:   35 11:30:12     -137.707642        0.041865
+FIRE:   36 11:30:13     -137.708450        0.026878
+FIRE:   37 11:30:15     -137.709045        0.032025
+FIRE:   38 11:30:17     -137.709396        0.036488
+FIRE:   39 11:30:17     -137.709595        0.026407
+FIRE:   40 11:30:18     -137.709732        0.026945
+FIRE:   41 11:30:19     -137.709763        0.026185
+FIRE:   42 11:30:20     -137.709839        0.024707
+FIRE:   43 11:30:21     -137.709930        0.022553
+FIRE:   44 11:30:22     -137.710037        0.019863
+FIRE:   45 11:30:23     -137.710144        0.016732
+FIRE:   46 11:30:24     -137.710236        0.013350
+FIRE:   47 11:30:25     -137.710327        0.009874
+
+== energy ledger | rank 2 (ok) ==
+E_bulk  sub (Cu):   -16.3376 eV total |  -4.0844 eV/atom
+strain in-plane : sub +0.0000% | film +2.5823%
+E_bulk coherent : sub  -4.0848 eV/atom (-0.00035 vs pristine) | film  -5.7204 eV/atom (+0.01057 vs pristine)
+E_slab  sub     :   -46.5739 eV (valid=True)
+E_slab film     :   -88.3971 eV (valid=True)
+E_interface     :  -137.7103 eV (valid=True)
+gamma_surf Cu   :     0.0935 eV/A^2 =   1.498 J/m^2
+gamma_surf Ni   :     0.1197 eV/A^2 =   1.918 J/m^2
+gamma_int       :     0.0036 eV/A^2 =   0.057 J/m^2
+OOD             : monitoring=heuristics_only committee_enabled=False score=0.000 triggered=False
+candidate 3/4: coherent:(0, 0, 1)-(0, 0, 1):0-0:sub1_1_0_2-film1_1_0_2
+          area=13.07 A^2, 28 atoms, mismatch=0.0258
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199modelF:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:30:42      -46.570877        0.091501
+FIRE:    1 11:30:42      -46.571247        0.083974
+FIRE:    2 11:30:43      -46.571861        0.069671
+FIRE:    3 11:30:43      -46.572506        0.050009
+FIRE:    4 11:30:43      -46.572983        0.027066
+FIRE:    5 11:30:44      -46.573181        0.023199
+FIRE:    6 11:30:44      -46.573154        0.026913
+FIRE:    7 11:30:45      -46.573166        0.026563
+FIRE:    8 11:30:45      -46.573196        0.025859
+FIRE:    9 11:30:45      -46.573235        0.024829
+FIRE:   10 11:30:46      -46.573280        0.023492
+FIRE:   11 11:30:46      -46.573334        0.021888
+FIRE:   12 11:30:46      -46.573380        0.020049
+FIRE:   13 11:30:47      -46.573429        0.018029
+FIRE:   14 11:30:47      -46.573471        0.015655
+FIRE:   15 11:30:48      -46.573509        0.012986
+FIRE:   16 11:30:48      -46.573544        0.012785
+FIRE:   17 11:30:48      -46.573574        0.016004
+FIRE:   18 11:30:49      -46.573612        0.017994
+FIRE:   19 11:30:49      -46.573662        0.018282
+FIRE:   20 11:30:50      -46.573730        0.016485
+FIRE:   21 11:30:50      -46.573807        0.012383
+FIRE:   22 11:30:50      -46.573872        0.006182
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:30:51      -87.988541        0.712486
+FIRE:    1 11:30:52      -88.011612        0.679100
+FIRE:    2 11:30:53      -88.052200        0.612543
+FIRE:    3 11:30:54      -88.100616        0.513635
+FIRE:    4 11:30:54      -88.145737        0.383898
+FIRE:    5 11:30:54      -88.178726        0.248654
+FIRE:    6 11:30:55      -88.198265        0.384167
+FIRE:    7 11:30:56      -88.212166        0.463811
+FIRE:    8 11:30:56      -88.232216        0.463890
+FIRE:    9 11:30:57      -88.263084        0.360308
+FIRE:   10 11:30:57      -88.297340        0.285079
+FIRE:   11 11:30:58      -88.323700        0.340293
+FIRE:   12 11:30:58      -88.347694        0.279630
+FIRE:   13 11:30:59      -88.376266        0.183998
+FIRE:   14 11:31:00      -88.389091        0.161628
+FIRE:   15 11:31:00      -88.390862        0.141790
+FIRE:   16 11:31:01      -88.393486        0.105128
+FIRE:   17 11:31:01      -88.395660        0.057144
+FIRE:   18 11:31:02      -88.396446        0.036798
+FIRE:   19 11:31:02      -88.396469        0.035700
+FIRE:   20 11:31:03      -88.396523        0.033556
+FIRE:   21 11:31:04      -88.396591        0.030434
+FIRE:   22 11:31:05      -88.396667        0.027817
+FIRE:   23 11:31:05      -88.396759        0.024924
+FIRE:   24 11:31:06      -88.396835        0.021624
+FIRE:   25 11:31:07      -88.396912        0.018020
+FIRE:   26 11:31:07      -88.396980        0.013831
+FIRE:   27 11:31:08      -88.397034        0.012769
+FIRE:   28 11:31:08      -88.397064        0.011050
+FIRE:   29 11:31:09      -88.397079        0.010988
+FIRE:   30 11:31:09      -88.397079        0.011915
+FIRE:   31 11:31:10      -88.397087        0.011668
+FIRE:   32 11:31:10      -88.397079        0.011185
+FIRE:   33 11:31:11      -88.397087        0.010475
+FIRE:   34 11:31:11      -88.397087        0.009552
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:31:13     -137.181015        0.712415
+FIRE:    1 11:31:14     -137.201523        0.678999
+FIRE:    2 11:31:15     -137.238205        0.612410
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+FIRE:    3 11:31:16     -137.283539        0.513580
+FIRE:    4 11:31:17     -137.328781        0.384315
+FIRE:    5 11:31:18     -137.366455        0.278007
+FIRE:    6 11:31:19     -137.393494        0.380032
+FIRE:    7 11:31:20     -137.412735        0.455829
+FIRE:    8 11:31:21     -137.431305        0.444258
+FIRE:    9 11:31:22     -137.452240        0.323712
+FIRE:   10 11:31:22     -137.474350        0.296755
+FIRE:   11 11:31:23     -137.496597        0.353731
+FIRE:   12 11:31:24     -137.523529        0.294351
+FIRE:   13 11:31:24     -137.555557        0.263225
+FIRE:   14 11:31:25     -137.583298        0.267137
+FIRE:   15 11:31:26     -137.606064        0.199392
+FIRE:   16 11:31:27     -137.620361        0.151753
+FIRE:   17 11:31:28     -137.623322        0.135149
+FIRE:   18 11:31:29     -137.628204        0.116189
+FIRE:   19 11:31:30     -137.633560        0.114685
+FIRE:   20 11:31:30     -137.638351        0.111625
+FIRE:   21 11:31:31     -137.642426        0.106230
+FIRE:   22 11:31:32     -137.646194        0.097991
+FIRE:   23 11:31:33     -137.649979        0.090541
+FIRE:   24 11:31:34     -137.654175        0.077243
+FIRE:   25 11:31:35     -137.658722        0.071243
+FIRE:   26 11:31:36     -137.664185        0.085256
+FIRE:   27 11:31:36     -137.671158        0.069267
+FIRE:   28 11:31:37     -137.678635        0.057382
+FIRE:   29 11:31:38     -137.684586        0.063791
+FIRE:   30 11:31:39     -137.689819        0.071901
+FIRE:   31 11:31:40     -137.695190        0.058176
+FIRE:   32 11:31:40     -137.700775        0.061590
+FIRE:   33 11:31:41     -137.705368        0.065341
+FIRE:   34 11:31:42     -137.707062        0.051377
+FIRE:   35 11:31:43     -137.707642        0.041872
+FIRE:   36 11:31:44     -137.708435        0.026879
+FIRE:   37 11:31:45     -137.709045        0.032048
+FIRE:   38 11:31:46     -137.709396        0.036518
+FIRE:   39 11:31:47     -137.709595        0.026428
+FIRE:   40 11:31:48     -137.709732        0.026943
+FIRE:   41 11:31:48     -137.709763        0.026182
+FIRE:   42 11:31:49     -137.709839        0.024680
+FIRE:   43 11:31:50     -137.709930        0.022541
+FIRE:   44 11:31:50     -137.710037        0.019862
+FIRE:   45 11:31:51     -137.710144        0.016737
+FIRE:   46 11:31:52     -137.710236        0.013348
+FIRE:   47 11:31:52     -137.710327        0.009877
+
+== energy ledger | rank 3 (ok) ==
+E_bulk  sub (Cu):   -16.3376 eV total |  -4.0844 eV/atom
+strain in-plane : sub +0.0000% | film +2.5823%
+E_bulk coherent : sub  -4.0848 eV/atom (-0.00035 vs pristine) | film  -5.7204 eV/atom (+0.01057 vs pristine)
+E_slab  sub     :   -46.5739 eV (valid=True)
+E_slab film     :   -88.3971 eV (valid=True)
+E_interface     :  -137.7103 eV (valid=True)
+gamma_surf Cu   :     0.0935 eV/A^2 =   1.498 J/m^2
+gamma_surf Ni   :     0.1197 eV/A^2 =   1.918 J/m^2
+gamma_int       :     0.0036 eV/A^2 =   0.057 J/m^2
+OOD             : monitoring=heuristics_only committee_enabled=False score=0.000 triggered=False
+candidate 4/4: coherent:(0, 0, 1)-(0, 0, 1):0-0:sub2_0_0_1-film2_0_0_1
+          area=13.07 A^2, 28 atoms, mismatch=0.0258
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:32:05      -46.570877        0.091501
+FIRE:    1 11:32:06      -46.571247        0.083974
+FIRE:    2 11:32:07      -46.571857        0.069671
+FIRE:    3 11:32:07      -46.572506        0.050009
+FIRE:    4 11:32:08      -46.572983        0.027066
+FIRE:    5 11:32:08      -46.573177        0.023199
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+F:\tmp\venv-ledger\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+WARNING:root:Default dtype float32 does not match model dtype float64, converting models to float32.
+FIRE:    6 11:32:09      -46.573151        0.026913
+FIRE:    7 11:32:09      -46.573166        0.026563
+FIRE:    8 11:32:10      -46.573196        0.025859
+FIRE:    9 11:32:10      -46.573235        0.024829
+FIRE:   10 11:32:10      -46.573284        0.023492
+FIRE:   11 11:32:11      -46.573334        0.021888
+FIRE:   12 11:32:12      -46.573383        0.020049
+FIRE:   13 11:32:12      -46.573429        0.018029
+FIRE:   14 11:32:13      -46.573471        0.015655
+FIRE:   15 11:32:13      -46.573509        0.012986
+FIRE:   16 11:32:14      -46.573544        0.012785
+FIRE:   17 11:32:14      -46.573574        0.016004
+FIRE:   18 11:32:15      -46.573608        0.017993
+FIRE:   19 11:32:15      -46.573662        0.018282
+FIRE:   20 11:32:16      -46.573730        0.016485
+FIRE:   21 11:32:16      -46.573807        0.012383
+FIRE:   22 11:32:17      -46.573872        0.006182
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:32:18      -87.988541        0.712486
+FIRE:    1 11:32:19      -88.011612        0.679100
+FIRE:    2 11:32:20      -88.052200        0.612543
+FIRE:    3 11:32:20      -88.100616        0.513635
+FIRE:    4 11:32:21      -88.145737        0.383899
+FIRE:    5 11:32:22      -88.178726        0.248654
+FIRE:    6 11:32:22      -88.198265        0.384167
+FIRE:    7 11:32:22      -88.212166        0.463811
+FIRE:    8 11:32:23      -88.232216        0.463890
+FIRE:    9 11:32:23      -88.263084        0.360309
+FIRE:   10 11:32:24      -88.297340        0.285080
+FIRE:   11 11:32:24      -88.323700        0.340300
+FIRE:   12 11:32:25      -88.347694        0.279621
+FIRE:   13 11:32:25      -88.376266        0.183997
+FIRE:   14 11:32:26      -88.389099        0.161619
+FIRE:   15 11:32:26      -88.390862        0.141779
+FIRE:   16 11:32:27      -88.393486        0.105127
+FIRE:   17 11:32:27      -88.395660        0.057143
+FIRE:   18 11:32:28      -88.396446        0.036775
+FIRE:   19 11:32:29      -88.396477        0.035691
+FIRE:   20 11:32:29      -88.396523        0.033549
+FIRE:   21 11:32:30      -88.396584        0.030434
+FIRE:   22 11:32:30      -88.396667        0.027824
+FIRE:   23 11:32:30      -88.396759        0.024926
+FIRE:   24 11:32:31      -88.396835        0.021629
+FIRE:   25 11:32:31      -88.396912        0.018019
+FIRE:   26 11:32:32      -88.396980        0.013829
+FIRE:   27 11:32:32      -88.397034        0.012769
+FIRE:   28 11:32:33      -88.397064        0.011050
+FIRE:   29 11:32:33      -88.397079        0.010983
+FIRE:   30 11:32:34      -88.397079        0.011903
+FIRE:   31 11:32:34      -88.397087        0.011668
+FIRE:   32 11:32:34      -88.397079        0.011185
+FIRE:   33 11:32:35      -88.397087        0.010475
+FIRE:   34 11:32:35      -88.397087        0.009552
+Using Materials Project MACE for MACECalculator with d:\MSC.Software\Adams\2018\mace/20231203mace128L1_epoch199model
+Using float32 for MACECalculator, which is faster but less accurate. Recommended for MD. Use float64 for geometry optimization.
+      Step     Time          Energy          fmax
+FIRE:    0 11:32:36     -137.181015        0.712414
+FIRE:    1 11:32:37     -137.201508        0.678999
+FIRE:    2 11:32:37     -137.238205        0.612410
+FIRE:    3 11:32:38     -137.283539        0.513580
+FIRE:    4 11:32:38     -137.328781        0.384315
+FIRE:    5 11:32:39     -137.366455        0.278007
+FIRE:    6 11:32:39     -137.393494        0.380032
+FIRE:    7 11:32:40     -137.412735        0.455829
+FIRE:    8 11:32:40     -137.431305        0.444258
+FIRE:    9 11:32:41     -137.452240        0.323712
+FIRE:   10 11:32:42     -137.474350        0.296755
+FIRE:   11 11:32:43     -137.496613        0.353731
+FIRE:   12 11:32:44     -137.523529        0.294345
+FIRE:   13 11:32:44     -137.555557        0.263224
+FIRE:   14 11:32:45     -137.583298        0.267136
+FIRE:   15 11:32:46     -137.606064        0.199373
+FIRE:   16 11:32:47     -137.620361        0.151738
+FIRE:   17 11:32:48     -137.623306        0.135146
+FIRE:   18 11:32:48     -137.628204        0.116186
+FIRE:   19 11:32:49     -137.633560        0.114685
+FIRE:   20 11:32:50     -137.638351        0.111625
+FIRE:   21 11:32:50     -137.642426        0.106231
+FIRE:   22 11:32:51     -137.646194        0.097991
+FIRE:   23 11:32:52     -137.649979        0.090549
+FIRE:   24 11:32:53     -137.654175        0.077250
+FIRE:   25 11:32:53     -137.658722        0.071246
+FIRE:   26 11:32:54     -137.664185        0.085248
+FIRE:   27 11:32:55     -137.671158        0.069272
+FIRE:   28 11:32:55     -137.678635        0.057380
+FIRE:   29 11:32:56     -137.684570        0.063794
+FIRE:   30 11:32:56     -137.689819        0.071889
+FIRE:   31 11:32:57     -137.695175        0.058174
+FIRE:   32 11:32:58     -137.700775        0.061544
+FIRE:   33 11:32:58     -137.705368        0.065344
+FIRE:   34 11:32:59     -137.707062        0.051393
+FIRE:   35 11:33:00     -137.707642        0.041873
+FIRE:   36 11:33:00     -137.708435        0.026881
+FIRE:   37 11:33:01     -137.709045        0.032035
+FIRE:   38 11:33:02     -137.709396        0.036505
+FIRE:   39 11:33:02     -137.709595        0.026409
+FIRE:   40 11:33:03     -137.709732        0.026964
+FIRE:   41 11:33:04     -137.709763        0.026203
+FIRE:   42 11:33:04     -137.709839        0.024705
+FIRE:   43 11:33:05     -137.709930        0.022547
+FIRE:   44 11:33:06     -137.710052        0.019859
+FIRE:   45 11:33:06     -137.710144        0.016732
+FIRE:   46 11:33:07     -137.710236        0.013348
+FIRE:   47 11:33:07     -137.710312        0.009895
+
+== energy ledger | rank 4 (ok) ==
+E_bulk  sub (Cu):   -16.3376 eV total |  -4.0844 eV/atom
+strain in-plane : sub +0.0000% | film +2.5823%
+E_bulk coherent : sub  -4.0848 eV/atom (-0.00035 vs pristine) | film  -5.7204 eV/atom (+0.01057 vs pristine)
+E_slab  sub     :   -46.5739 eV (valid=True)
+E_slab film     :   -88.3971 eV (valid=True)
+E_interface     :  -137.7103 eV (valid=True)
+gamma_surf Cu   :     0.0935 eV/A^2 =   1.498 J/m^2
+gamma_surf Ni   :     0.1197 eV/A^2 =   1.918 J/m^2
+gamma_int       :     0.0036 eV/A^2 =   0.057 J/m^2
+OOD             : monitoring=heuristics_only committee_enabled=False score=0.000 triggered=False
+
+Wrote F:\tmp\d1_thickness\thick_10.8_vac15\candidates.csv, metadata.yaml and structures to F:\tmp\d1_thickness\thick_10.8_vac15/
+ledger   : 4/4 candidate(s) valid
