@@ -163,10 +163,11 @@ def _load_default(cls: Any, device: str, dtype: str = "float32") -> Any:
     Args:
         cls: ``MACECalculator`` (or a compatible drop-in).
         device: ASE/torch device string forwarded to the calculator.
-        dtype: torch dtype forwarded to ``mace_mp`` (and to the manual
-            fallback as ``default_dtype``); ``"float32"`` keeps the
-            historical behaviour, ``"float64"`` selects double precision
-            for reference runs.
+        dtype: torch dtype, forwarded to both tiers as ``mace_mp``'s
+            ``default_dtype`` (the helper's own spelling -- passing
+            ``dtype=`` there is absorbed by its ``**kwargs`` and silently
+            ignored); ``"float32"`` keeps the historical behaviour,
+            ``"float64"`` selects double precision for reference runs.
 
     Returns:
         A constructed calculator instance bound to the default weights.
@@ -184,7 +185,13 @@ def _load_default(cls: Any, device: str, dtype: str = "float32") -> Any:
         mace_mp = None  # type: ignore[assignment]
     if mace_mp is not None:
         try:
-            return mace_mp(model="medium", device=device, dtype=dtype)
+            # ``mace_mp``'s precision knob is spelled ``default_dtype``;
+            # passing ``dtype=`` there lands in the helper's ``**kwargs``
+            # and is handed to ``MACECalculator``, which reads its own
+            # ``default_dtype`` (still "float32") and silently builds a
+            # float32 model.  No error, no warning -- the run just is not
+            # the precision it was asked for.
+            return mace_mp(model="medium", device=device, default_dtype=dtype)
         except Exception as exc:  # noqa: BLE001
             attempts.append(f"mace_mp helper: {type(exc).__name__}: {exc}")
     try:
