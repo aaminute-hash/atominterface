@@ -1,0 +1,32 @@
+tool: atominterface
+version: 0.2.1
+run_id: 8a64f9a363
+seed: 0
+backend: mace
+backend_version: 0.3.17
+model_hash: MACE-MP-0/medium@mace-torch:0.3.17:sha256:01bfe2210013
+units: eV_A
+cli_args:
+  backend: mace
+  device: cpu
+  min_thickness: 14.4
+  vacuum: 15.0
+  max_candidates: 10
+  fmax: 0.002
+  max_steps: 200
+  outdir: F:/tmp/d1_fmax002
+artifacts:
+  candidates.csv: f63a01b1f0e4bbb3d3d1815229846319844f46af49d50487af66f9e0a624013c
+env:
+  python: 3.13.14
+  platform: Windows-11-10.0.26340-SP0
+  ase: 3.29.0
+  pymatgen: unknown
+  torch: 2.14.1+cpu
+  numpy: 2.5.4
+  pymatgen_installed: 2026.10.24
+extra:
+  valid: true
+  invalid_reasons: ''
+  committee_enabled: false
+  ood_monitoring: heuristics_only
