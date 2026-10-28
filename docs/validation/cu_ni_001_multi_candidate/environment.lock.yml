@@ -1,0 +1,41 @@
+# Environment lock for the multi-candidate Cu(001)|Ni(001) benchmark
+# in this directory (run_id e377717853, 2026-10-28).
+# Distilled from provenance_extra.yaml (post-hoc, by eng-a-2) and README.md §8.
+# The script-emitted metadata.yaml records pymatgen as "unknown"; the actual
+# installed version below comes from the post-hoc provenance record.
+
+atominterface:
+  version: 0.2.1
+  git_commit: 92dc284        # origin/main, includes PR #13/#14/#15
+
+python: 3.13.14
+platform: Windows-11-10.0.26340-SP0
+
+packages:
+  torch: 2.14.1+cpu
+  mace-torch: 0.3.17         # recorded as backend_version in metadata.yaml
+  ase: 3.29.0
+  numpy: 2.5.4
+  pymatgen: 2026.10.24       # actually installed and used (metadata.yaml: "unknown")
+
+model:
+  name: MACE-MP-0
+  size: medium
+  dtype: float32             # backend default; weights are float64, downcast on load
+  units: eV_A
+  model_hash: MACE-MP-0/medium@mace-torch:0.3.17:sha256:01bfe2210013
+  weight_sha256: 01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845
+  weight_size_mb: 44.42
+  weight_url: https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model
+
+run:
+  run_id: e377717853
+  seed: 0
+  wall_clock: 24m 50s (2026-10-28 08:15:31 -> 08:40:21)
+
+# Known environment noise (does not affect results, see README.md §9):
+# - The MACE weight cache landed in d:\MSC.Software\Adams\2018\mace\... because
+#   mace-torch's get_cache_dir() picked up an anomalous HOME/XDG_CACHE_HOME on
+#   this machine. On another machine the cache path will differ.
+# - A fresh MACECalculator is built per single point (calculator(atoms) factory),
+#   so part of the 24m50s is repeated torch.jit.load of the 44 MB weights.
