@@ -1,5 +1,82 @@
 # Changelog
 
+## [0.3.0] - 2026-10-28
+
+Closes Phase 0.3.2: the Cu/Ni(001) benchmark is reproducible end to end, and
+every number it reports carries a measured uncertainty instead of a hope.
+
+### Added
+
+- **A working OOD committee.** `build --relax --committee-backend <backend>`
+  mounts a second uMLIP beside the primary one through
+  `GuardedRelaxer.from_calculators`, so `ood_score` measures disagreement
+  between two independently trained models rather than being a constant zero.
+  The flag is empty by default: without it nothing changes.
+- **A threshold the committee can actually fire at.** The committee reports
+  eV/Å while `ood_threshold` was calibrated for `ForceNormWatcher`'s
+  dimensionless score, so both the measured distribution-in baselines
+  (0.030-0.068 eV/Å) and real out-of-distribution cases (0.4-0.66 eV/Å) sat
+  below it. The committee now has its own threshold,
+  `DEFAULT_COMMITTEE_THRESHOLD = 0.15` eV/Å, with the calibration basis
+  recorded beside the constant, and the winning watcher is named in the
+  metadata so a trigger can be attributed.
+- **Per-side slab thicknesses.** `min_thickness_substrate` /
+  `min_thickness_film` on `CoherentInterfaceConfig`, `--min-thickness-substrate`
+  / `--min-thickness-film` on the builder and on example 03, each falling back
+  to the shared `min_thickness` when unset. The resolved values are recorded
+  per row as `min_thickness_substrate_A` / `min_thickness_film_A`, so the layer
+  counts in the same row stop contradicting the thickness column.
+- **A dtype choice for the MACE backend.** `get_calculator("mace",
+  dtype="float64")` and example 03's `--dtype`; the default stays `float32`.
+- **The Cu/Ni(001) benchmark archive.**
+  `docs/validation/cu_ni_001_multi_candidate/` holds the 10-candidate run, the
+  `fmax = 0.002` convergence batch, the float64 control and the
+  thickness/vacuum scan as per-candidate CSVs plus structures, with
+  `environment.lock.yml` and `reproduce.md` (a five-step checklist for
+  confirming that a reproduction matched).
+
+### Fixed
+
+- **MACE float64 was silently a no-op.** `mace_mp()`'s parameter is spelled
+  `default_dtype`; passing `dtype=` fell into its `**kwargs`, so a float64
+  request built a float32 model with no error and no warning while the run
+  metadata still recorded `dtype: float64`. The test that should have caught
+  it mocked `mace_mp` as `def mace_mp(**kwargs)` -- accepting any keyword name,
+  it pinned the wrong contract and stayed green over a dead feature. The mock
+  now spells the real signature, so a wrong name raises instead of passing
+  silently. **v0.2.1 carries the broken entry point**: do not use
+  `--dtype float64` there (documented in `docs/validation_cu_ni_001.md` and in
+  the archive README).
+- `mypy src examples tests`: 22 errors to 0. `examples/03` had 16 unique error
+  sites; all were fixed by annotation and narrowing, with no `type: ignore`.
+
+### Science
+
+Cu/Ni(001), MACE-MP-0 medium, float32, coherent bulk reference:
+
+- 10/10 candidates valid; gamma_Cu 1.4977, gamma_Ni 1.9183 J/m2.
+- gamma_int = **0.0567 +/- 0.0002 J/m2** at `fmax = 0.002`, against 0.0617 for
+  the same candidates at `fmax = 0.01` -- a +0.005 J/m2 bias from residual
+  relaxation convergence, not from physics, model error or a code defect. Each
+  candidate's displacement scales with its residual force, and two independent
+  observables agree (gamma_int spread narrows 25x, per-cell energy spread 22x).
+- float64 control: 0.0616 versus 0.0617. **Precision is not the bottleneck; the
+  force gate is.**
+- 14.4 A is a converged thickness (10.8 to 14.4 steps +0.0044 J/m2, 14.4 to
+  18.0 only +0.0005); vacuum from 10 to 20 A changes nothing.
+- Per-side thicknesses decompose as expected: gamma_Cu tracks the substrate
+  layer count, gamma_Ni the film's, and gamma_int's thickness dependence is
+  almost entirely the Ni side.
+
+### Known limitations
+
+- The 0.15 eV/A committee threshold is calibrated on three structures; it needs
+  re-calibration on more material systems before being relied on.
+- The 10 candidates share one in-plane strain, so the batch is a
+  supercell-consistency check rather than a strain scan.
+- Without `--committee-backend`, `ood_score = 0` means "not measured", not
+  "in distribution".
+
 ## [0.2.1] - 2026-10-26
 
 ### Added
