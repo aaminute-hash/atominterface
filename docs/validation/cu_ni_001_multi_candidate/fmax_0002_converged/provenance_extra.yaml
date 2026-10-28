@@ -1,0 +1,15 @@
+note: Post-hoc additions by eng-a-2 (NOT part of the script output). metadata.yaml
+  is kept faithful to what examples/03_interface_energy.py wrote.
+numpy: 2.5.4
+pymatgen_installed: 2026.10.24
+weight_sha256_full: 01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845
+weight_path: d:\MSC.Software\Adams\2018\mace\20231203mace128L1_epoch199model
+weight_size_mb: 44.42
+weight_url: https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model
+wall_clock: 20m 56s (09:32:48 -> 09:53:44, from FIRE timestamps); probe 5m 25s
+command_line: cd F:/tmp/wt-d1 && PYTHONPATH=F:/tmp/wt-d1/src F:/tmp/venv-ledger/Scripts/python.exe
+  examples/03_interface_energy.py --backend mace --device cpu --max-candidates 10
+  --min-thickness 14.4 --vacuum 15.0 --fmax 0.002 --max-steps 200 --outdir F:/tmp/d1_fmax002
+git_commit: 92dc284 (origin/main)
+worktree: F:/tmp/wt-d1
+reference_run: F:/tmp/d1_out (identical command line except --fmax 0.01)
