@@ -10,6 +10,7 @@ fixture, mirroring the style of ``tests/test_cli.py`` (CliRunner) and
 
 from __future__ import annotations
 
+import argparse
 import csv
 import importlib.util
 import json
@@ -417,7 +418,9 @@ def test_example_03_calculator_exception_invalidates_gamma(example03, tmp_path, 
     def failing_factory(atoms):
         raise RuntimeError("weights unavailable")
 
-    monkeypatch.setattr(example03, "_make_calculator", lambda backend, device: failing_factory)
+    monkeypatch.setattr(
+        example03, "_make_calculator", lambda backend, device, dtype: failing_factory
+    )
     code, row = _run_example_main(example03, tmp_path / "out")
 
     assert code != 0
@@ -481,7 +484,7 @@ def test_example_03_nonfinite_calculator_invalidates_gamma(
     monkeypatch.setattr(
         example03,
         "_make_calculator",
-        lambda backend, device: NonFiniteCalculator,
+        lambda backend, device, dtype: NonFiniteCalculator,
     )
     code, row = _run_example_main(example03, tmp_path / "out")
 
@@ -650,3 +653,146 @@ def test_example_03_single_candidate_default_is_unchanged(example03, tmp_path):
     assert rows[0]["rank"] == "1"
     assert rows[0]["status"] == "ok"
     assert rows[0]["gamma_eV_per_A2"] != ""
+
+
+# --- exposed knobs: --dtype and the per-side thickness overrides ---------
+#
+# Both were available to the builder/registry layers before this demo
+# exposed them; the tests below pin the forwarding and, more importantly,
+# that leaving them at their defaults reproduces the old behaviour bit
+# for bit.
+
+
+class _Capture:
+    """Calculator factory stand-in that records kwargs and still works.
+
+    The captured factory has to return a *usable* ASE calculator: the
+    caller asserts on ``main()``'s exit code too, and a factory that
+    returns None makes every candidate fail for reasons unrelated to the
+    forwarding being tested.  The dummy backend is the real delegate.
+    """
+
+    def __init__(self, delegate) -> None:
+        self._delegate = delegate
+        self.kwargs: dict[str, object] = {}
+
+    def __call__(self, *args, **kwargs):
+        self.kwargs = dict(kwargs)
+        return self._delegate(*args, **kwargs)
+
+
+def _capture_calculator(monkeypatch, example03) -> _Capture:
+    from atominterface import backends
+
+    real = backends.get_calculator
+    capture = _Capture(real)
+    monkeypatch.setattr(backends, "get_calculator", capture)
+    return capture
+
+
+def test_example_03_dtype_defaults_to_float32(example03, tmp_path, monkeypatch):
+    """The default dtype is float32, matching mace-torch's own default."""
+    capture = _capture_calculator(monkeypatch, example03)
+    code = example03.main(
+        ["--backend", "dummy", "--fmax", "0.05", "--outdir", str(tmp_path / "out")]
+    )
+
+    assert code == 0
+    assert capture.kwargs["dtype"] == "float32"
+    assert capture.kwargs["device"] == "cpu"
+    assert capture.kwargs["seed"] == example03.SEED
+
+
+def test_example_03_dtype_float64_is_forwarded(example03, tmp_path, monkeypatch):
+    """--dtype float64 reaches the backend factory verbatim."""
+    capture = _capture_calculator(monkeypatch, example03)
+    code = example03.main(
+        [
+            "--backend",
+            "dummy",
+            "--fmax",
+            "0.05",
+            "--dtype",
+            "float64",
+            "--outdir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    assert code == 0
+    assert capture.kwargs["dtype"] == "float64"
+
+
+def test_example_03_dtype_is_recorded_in_the_provenance(example03, tmp_path):
+    """cli_args in metadata.yaml carries the dtype so a run is reproducible."""
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    example03.main(
+        ["--backend", "dummy", "--fmax", "0.05", "--dtype", "float64", "--outdir", str(outdir)]
+    )
+    meta = _read_metadata(outdir / "metadata.yaml")
+
+    assert meta["cli_args"]["dtype"] == "float64"
+
+
+def _fake_args(**overrides) -> argparse.Namespace:
+    """Namespace shaped like _parse_args' output, for _build_candidates."""
+    values = {
+        "backend": "dummy",
+        "device": "cpu",
+        "dtype": "float32",
+        "min_thickness": 14.4,
+        "min_thickness_substrate": None,
+        "min_thickness_film": None,
+        "vacuum": 15.0,
+        "max_candidates": 3,
+        "fmax": 0.01,
+        "max_steps": 200,
+        "outdir": "outputs/energy_cu_ni",
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_example_03_per_side_thickness_defaults_fall_back(example03):
+    """No per-side override: both sides resolve to the shared --min-thickness."""
+    pytest.importorskip("pymatgen")
+    substrate, film = example03._load_bulks()
+    _, config = example03._build_candidates(substrate, film, _fake_args())
+
+    assert config.slab_thicknesses() == (14.4, 14.4)
+    assert config.min_thickness == 14.4
+
+
+def test_example_03_per_side_thickness_overrides_are_forwarded(example03):
+    """Explicit per-side overrides win over the shared value, per side."""
+    pytest.importorskip("pymatgen")
+    substrate, film = example03._load_bulks()
+    _, config = example03._build_candidates(
+        substrate,
+        film,
+        _fake_args(min_thickness_substrate=18.0, min_thickness_film=21.6),
+    )
+
+    assert config.slab_thicknesses() == (18.0, 21.6)
+    # The shared value is left alone, not overwritten by the override.
+    assert config.min_thickness == 14.4
+
+
+def test_example_03_default_knobs_leave_the_ledger_unchanged(example03, tmp_path):
+    """Default --dtype/--min-thickness* reproduce the pre-existing ledger.
+
+    The reference point is the 14.4 A plateau documented in
+    docs/validation_cu_ni_001.md: 8 Cu layers on the substrate side and 10
+    Ni layers on the film side, unchanged by the new flags.
+    """
+    pytest.importorskip("pymatgen")
+    outdir = tmp_path / "out"
+    code = _run_multi(example03, outdir)
+
+    assert code == 0
+    row = _csv_row(outdir)
+    assert row["min_thickness_A"] == "14.4000"
+    assert row["n_layers_sub"] == "8"
+    assert row["n_layers_film"] == "10"
+    assert row["vacuum_A"] == "15.0000"
