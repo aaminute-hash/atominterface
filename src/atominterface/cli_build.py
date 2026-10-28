@@ -67,6 +67,7 @@ _RUN_CONFIG_KEYS = frozenset(
         "symmetric",
         "relax",
         "backend",
+        "committee_backend",
         "device",
         "fmax",
         "max_steps",
@@ -209,6 +210,26 @@ def _finite_positive(value: float) -> float:
     if not math.isfinite(value) or value <= 0:
         raise typer.BadParameter("must be finite and positive")
     return value
+
+
+def _parse_backend_list(values: list[str] | str | None) -> list[str]:
+    """Normalize repeated flags and comma-separated spellings to one flat list.
+
+    ``--committee-backend mace,chgnet`` and the repeated
+    ``--committee-backend mace --committee-backend chgnet`` describe the
+    same committee; config-file values arrive as whatever YAML holds
+    (a list, or a single comma-separated string), so both shapes are
+    accepted here.  Empty entries are dropped, which makes an explicitly
+    empty value mean "no committee" rather than an unknown backend.
+    """
+    if values is None:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    names: list[str] = []
+    for value in values:
+        names.extend(part.strip() for part in str(value).split(",") if part.strip())
+    return names
 
 
 def _optional_finite_positive(value: float | None) -> float | None:
@@ -365,6 +386,7 @@ def _relax_candidates(
     candidates: list,
     *,
     backend: str,
+    committee_backends: list[str],
     device: str,
     fmax: float,
     max_steps: int,
@@ -378,6 +400,12 @@ def _relax_candidates(
     relaxed geometry, and the OOD bookkeeping is stashed in
     ``candidate.metadata["relax"]`` for the JSON report.
 
+    ``committee_backends`` names extra models whose force disagreement
+    forms the OOD committee: the primary backend drives the relaxation
+    and every listed backend is mounted alongside it through
+    :meth:`GuardedRelaxer.from_calculators`.  An empty list keeps the
+    historical single-model construction untouched.
+
     Returns:
         A ``{rank: RelaxResult}`` map keyed like the written candidates.
     """
@@ -388,13 +416,27 @@ def _relax_candidates(
         f"\nRelaxing {len(candidates)} candidate(s) with backend={backend} device={device} "
         f"(fmax={fmax:g}, max_steps={max_steps}, ood_threshold={ood_threshold:g})."
     )
-    relaxer = GuardedRelaxer(
-        calculator=get_calculator(backend, device=device),
+    primary = get_calculator(backend, device=device)
+    relaxer_kwargs: dict[str, Any] = dict(
         fmax=fmax,
         max_steps=max_steps,
         ood_threshold=ood_threshold,
         quarantine_dir=str(outdir / "flagged"),
     )
+    # Committee members are shared across candidates, so each factory is
+    # resolved exactly once (a heavy model must not reload per candidate).
+    # They are handed over as instances because CommitteeWatcher calls
+    # ``get_forces(atoms)`` on them directly.
+    committee = (
+        [get_calculator(name, device=device)(candidates[0].atoms) for name in committee_backends]
+        if committee_backends and candidates
+        else []
+    )
+    if committee:
+        relaxer = GuardedRelaxer.from_calculators([primary, *committee], **relaxer_kwargs)
+        typer.echo(f"  committee backend(s): {', '.join(committee_backends)}")
+    else:
+        relaxer = GuardedRelaxer(calculator=primary, **relaxer_kwargs)
     results: dict[int, Any] = {}
     for rank, candidate in enumerate(candidates, start=1):
         result = relaxer.run(candidate.atoms)
@@ -559,6 +601,7 @@ def _resolve_run_params(
         "vacuum": _finite_nonnegative(float(_pick("vacuum"))),
         "max_candidates": int(_pick("max_candidates")),
         "backend": _pick("backend"),
+        "committee_backend": _parse_backend_list(_pick("committee_backend")),
         "device": _validate_device(_pick("device")),
         "relax": bool(_pick("relax")),
         "fmax": _finite_nonnegative(float(_pick("fmax"))),
@@ -621,6 +664,15 @@ def build(
         "dummy",
         "--backend",
         help="Calculator backend for --relax: dummy, mace or chgnet.",
+    ),
+    committee_backend: list[str] = typer.Option(
+        [],
+        "--committee-backend",
+        help=(
+            "Extra calculator backend(s) mounted as the OOD committee with "
+            "--relax; repeatable or comma-separated. Empty (the default) "
+            "runs without a committee."
+        ),
     ),
     device: str = typer.Option(
         "cpu",
@@ -717,6 +769,7 @@ def build(
             "vacuum": vacuum,
             "max_candidates": max_candidates,
             "backend": backend,
+            "committee_backend": committee_backend,
             "device": device,
             "relax": relax,
             "fmax": fmax,
@@ -734,6 +787,8 @@ def build(
     builder_cls = _resolve_builder(params["builder"])
     _check_charge_support(ctx, params["builder"], params["symmetric"])
     _resolve_backend(params["backend"])
+    for name in params["committee_backend"]:
+        _resolve_backend(name)
     config = _make_config(
         params["builder"],
         substrate_miller=tuple(params["sub_miller"]),
@@ -772,6 +827,7 @@ def build(
         relax_results = _relax_candidates(
             candidates,
             backend=params["backend"],
+            committee_backends=params["committee_backend"],
             device=params["device"],
             fmax=params["fmax"],
             max_steps=params["max_steps"],
