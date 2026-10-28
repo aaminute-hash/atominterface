@@ -499,7 +499,10 @@ def test_example_03_nonfinite_calculator_invalidates_gamma(
 # multi-candidate ledger: every candidate gets a row, judged on its own
 # ------------------------------------------------------------------
 def _run_multi(example03, outdir: Path, *extra: str) -> int:
-    return example03.main(
+    # Annotated local: the example03 fixture is dynamically imported, so
+    # ``example03.main`` is ``Any`` to the type checker; the annotation
+    # keeps the declared ``-> int`` from leaking that ``Any`` outward.
+    code: int = example03.main(
         [
             "--backend",
             "dummy",
@@ -512,6 +515,7 @@ def _run_multi(example03, outdir: Path, *extra: str) -> int:
             *extra,
         ]
     )
+    return code
 
 
 def test_example_03_ledgers_every_candidate(example03, tmp_path):
