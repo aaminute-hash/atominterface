@@ -15,13 +15,17 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from atominterface import __version__ as _tool_version
+
 
 @dataclass
 class RunMeta:
     """Reproducibility metadata for one AtomInterface run."""
 
     tool: str = "atominterface"
-    version: str = "0.2.1"
+    # Follows the package version instead of repeating it, so a release bump
+    # cannot leave the recorded provenance behind the shipped code.
+    version: str = _tool_version
     run_id: str = ""
     seed: int | None = None
     backend: str = "unknown"
