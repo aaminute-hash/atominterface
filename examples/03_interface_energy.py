@@ -49,6 +49,8 @@ the same process are bit-identical.
 Run:
     python examples/03_interface_energy.py --backend dummy --fmax 0.05
     python examples/03_interface_energy.py --backend mace --device cpu
+    python examples/03_interface_energy.py --backend mace --dtype float64 --fmax 0.01
+    python examples/03_interface_energy.py --min-thickness-substrate 18.0 --min-thickness-film 14.4
 
 Fail-closed demonstration (non-zero exit, empty gamma cells):
     python examples/03_interface_energy.py --backend dummy --max-steps 1 --fmax 1e-6
@@ -301,16 +303,46 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda"), help="compute device.")
     parser.add_argument(
+        "--dtype",
+        default="float32",
+        choices=("float32", "float64"),
+        help=(
+            "calculator precision forwarded to the backend. float32 (default) "
+            "matches mace-torch's own default; float64 is the double-precision "
+            "reference channel that separates physics from float32 rounding in "
+            "validation studies."
+        ),
+    )
+    parser.add_argument(
         "--min-thickness",
         type=float,
         default=14.4,
         help=(
-            "minimum slab thickness in A. 14.4 A cuts 8 Cu / 10 Ni layers, "
+            "minimum slab thickness in A, applied to both sides unless a "
+            "per-side override is given. 14.4 A cuts 8 Cu / 10 Ni layers, "
             "the plateau point of the thickness scan in "
             "docs/validation_cu_ni_001.md; the previous 6.0 A default cut "
             "only 4 Ni layers and reported gamma_Ni = 1.979 J/m^2 and "
             "gamma_int = 0.041 J/m^2 against converged values of 1.9189 and "
             "0.0590 -- 3%% and 30%% off, respectively."
+        ),
+    )
+    parser.add_argument(
+        "--min-thickness-substrate",
+        type=float,
+        default=None,
+        help=(
+            "minimum substrate (Cu) slab thickness in A. Defaults to None, "
+            "which falls back to the shared --min-thickness."
+        ),
+    )
+    parser.add_argument(
+        "--min-thickness-film",
+        type=float,
+        default=None,
+        help=(
+            "minimum film (Ni) slab thickness in A. Defaults to None, which "
+            "falls back to the shared --min-thickness."
         ),
     )
     parser.add_argument("--vacuum", type=float, default=15.0, help="vacuum padding in A.")
@@ -354,16 +386,18 @@ def _to_ase(structure):
     return AseAtomsAdaptor.get_atoms(structure)
 
 
-def _make_calculator(backend: str, device: str):
+def _make_calculator(backend: str, device: str, dtype: str):
     """One calculator factory shared by every energy in the ledger.
 
     The seed is honoured by the dummy backend (deterministic stand-in
     forces); real backends are deterministic by construction and ignore
-    it.
+    it.  ``dtype`` is forwarded to the backend: the mace factory validates
+    it, and the dummy/chgnet factories accept and ignore it, so the default
+    ``float32`` leaves every backend's own default path untouched.
     """
     from atominterface.backends import get_calculator
 
-    return get_calculator(backend, device=device, seed=SEED)
+    return get_calculator(backend, device=device, seed=SEED, dtype=dtype)
 
 
 def _single_point(atoms, calculator) -> tuple[float, object]:
@@ -527,6 +561,8 @@ def _build_candidates(substrate, film, args: argparse.Namespace):
         max_area=MAX_AREA,
         gap=GAP,
         min_thickness=args.min_thickness,
+        min_thickness_substrate=args.min_thickness_substrate,
+        min_thickness_film=args.min_thickness_film,
         vacuum_thickness=args.vacuum,
         max_candidates=args.max_candidates,
     )
@@ -1056,7 +1092,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
 
     calculator = None
     try:
-        calculator = _make_calculator(args.backend, args.device)
+        calculator = _make_calculator(args.backend, args.device, args.dtype)
     except Exception as exc:  # noqa: BLE001
         record_error("calculator", exc)
     print(f"backend  : {args.backend} (device {args.device})")
