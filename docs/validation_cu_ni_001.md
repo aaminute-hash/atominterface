@@ -316,7 +316,9 @@ reproduction guide live in
 | γ_surf_Ni (J/m²) | 10 | 1.9183 | 1.9183 | 1.9183 | 1.9183 | 0.0000 |
 
 The mean γ_int (0.0589) sits above the median because the four smallest
-supercells pull it up; the median is the honest headline.
+supercells pull it up. Both carry the small-supercell bias quantified
+below: even this batch's median (0.0573) is +0.0006 J/m² above the
+converged value.
 
 **What this run actually tests.** Under `max_area = 100 Å²` every ZSL
 solution for Cu(001)‖Ni(001) is an integer multiple of the 1×1 cell, so
@@ -335,20 +337,45 @@ geometry into the 1×1 cell reproduces the 4× cell's energy to
 (18/36 atoms), **0.0568** (54), **0.0573** (72) J/m² — and the residual
 cause is the soft out-of-plane breathing mode passing the
 `fmax = 0.01 eV/Å` gate: the same mode §5(b) documents at the looser
-0.05 tolerance, narrowed but not eliminated.
+0.05 tolerance. A dedicated `fmax = 0.002` re-run of the identical 10
+candidates confirms this attribution directly (below).
 
-**Best estimate and its shape.** γ_int ≈ **0.0568–0.0573 J/m²** with a
-one-sided error band (+0.004 / −0.001 J/m²), not a symmetric ±0.002 —
-the spread is one-directional. The 14.4 Å row of the §3 thickness scan
-(0.0617) equals the small-supercell cluster exactly, which is the
-expected signature of the same residual-convergence mechanism.
+**Best estimate.** With the convergence confirmed below, the honest
+benchmark is **γ_int = 0.0567 ± 0.0002 J/m²** (`fmax = 0.002`, 10
+candidates). The `fmax = 0.01` values in the table above are biased
+high by ≈ +0.005 J/m² on the smallest supercells (A cluster), +0.0006
+on the 72-atom cluster (C) and ≈ 0 on the 54-atom cluster (B); the
+batch median is +0.0006 high. The 14.4 Å row of the §3 thickness scan
+(0.0617) equals the small-supercell cluster exactly, the expected
+signature of the same residual-convergence mechanism — that row should
+be read as 0.0567 plus convergence residual.
 
-**Not yet done.** The full `fmax = 0.002 eV/Å` convergence check that
-would pin the residual to ±0.001 J/m² is still running; the control
-experiments above localise the cause but do not replace it. This
-section will be updated with measured numbers when that run lands. A
-float64 control run (entry point available since v0.2.1, see §12) has
-not been run either.
+**Convergence confirmed.** The identical 10 candidates were re-run with
+only `--fmax` changed to 0.002 eV/Å (data:
+[`fmax_0002_converged/`](validation/cu_ni_001_multi_candidate/fmax_0002_converged/)).
+The three clusters collapse:
+
+| metric | fmax = 0.01 | fmax = 0.002 |
+|---|---|---|
+| γ_int median (J/m²) | 0.0573 | **0.0567** |
+| γ_int range (J/m²) | 0.0049 | **0.0002** |
+| γ_int sd (J/m²) | 0.0025 | **0.0001** |
+| E_interface/cell spread (meV) | 1.983 | **0.089** |
+
+Two independent observables shrink consistently — the γ_int range by
+~25×, the E_interface-per-cell spread by ~22× — and the per-cluster
+shift tracks the residual force monotonically: the A cluster (18/36
+atoms, 53 steps, terminal |F|max 0.0099) moves −0.0050 J/m², the C
+cluster (72 atoms, 49 steps, 0.0090) moves −0.0006, the B cluster
+(54 atoms, 52 steps, 0.0077) barely moves. "The least-converged
+candidate falls the most" is the signature of residual convergence
+error, not of a physical split, model error, or a code bug. Relaxation
+steps went 49–53 → 71–75, none hitting `max_steps = 200`. γ_surf_Cu
+and γ_surf_Ni also moved, but by two orders of magnitude less
+(0.093476 → 0.093472 and 0.119728 → 0.119714 eV/Å²) and remain
+near-identical across the 10 candidates. **Still open:** a float64
+control run (entry point available since v0.2.1, see §12) has not been
+run.
 
 ## 9. Why γ_int is the weakest number here
 
