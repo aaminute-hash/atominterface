@@ -422,9 +422,13 @@ The §3/§4 scans were single-candidate. They have now been re-run with
 dropped; data:
 [`thickness_vacuum_scan/`](validation/cu_ni_001_multi_candidate/thickness_vacuum_scan/)),
 reproducing the single-candidate curves quantitatively. These runs used
-`fmax = 0.01` like the formal batch, so the absolute γ_int values carry
-the same small-supercell bias documented above; what the scan measures
-is the *steps*, and the converged benchmark remains 0.0567 ± 0.0002 J/m².
+`fmax = 0.01` like the formal batch, so absolute γ_int values carry the
+same small-supercell bias documented above; the scan measures *steps*,
+and the converged benchmark remains 0.0567 ± 0.0002 J/m². Group means
+below are recomputed from the archived per-candidate `candidates.csv`
+values; the operator README's summary table reports the 18.0 Å row (and
+the split group's γ_Cu) 0.0001 J/m² lower — a truncation artefact, kept
+verbatim in the archive, changing no conclusion.
 
 **Thickness (vacuum fixed at 15 Å, 4-candidate means):**
 
@@ -432,37 +436,39 @@ is the *steps*, and the converged benchmark remains 0.0567 ± 0.0002 J/m².
 |---|---|---|---|---|
 | 10.8 | 6 / 8 | 1.4977 | 1.9181 | 0.0573 |
 | **14.4 (default)** | **8 / 10** | **1.4977** | **1.9183** | **0.0617** |
-| 18.0 | 10 / 12 | 1.4978 | 1.9184 | 0.0621 |
+| 18.0 | 10 / 12 | 1.4979 | 1.9185 | 0.0622 |
 
-10.8 → 14.4 Å steps **+0.0045 J/m² (+7 %)**; 14.4 → 18.0 Å moves only
-**+0.0004 J/m²**, already inside the 4-candidate spread. **14.4 Å is the
-converged point and 10.8 Å is under-converged** — the same curve §3
-measured on one candidate (0.0573 / 0.0617 / 0.0620), and the 14.4 Å
-value equals §8's small-supercell cluster, i.e. thickness convergence is
-independent of supercell choice.
+10.8 → 14.4 Å steps **+0.0044 J/m² (+7.7 %)**; 14.4 → 18.0 Å moves only
+**+0.0005 J/m² (+0.9 %)**, comparable to the 18.0 group's own
+within-group spread (0.0003). **14.4 Å is the converged point and
+10.8 Å is under-converged** — the same curve §3 measured on one
+candidate (0.0573 / 0.0617 / 0.0620), and the 14.4 Å value equals §8's
+small-supercell cluster, i.e. thickness convergence is independent of
+supercell choice.
 
 **Vacuum (thickness fixed at 14.4 Å):** 10 / 15 / 20 Å give γ_Cu, γ_Ni
-and γ_int **identical to the written precision** (0.0617). The 15 Å
-default carries margin, as §4's single-candidate 10–25 Å sweep already
-indicated.
+and γ_int **identical candidate-by-candidate to the written precision**
+(γ_int mean 0.0617 in all three groups). The 15 Å default carries
+margin, as §4's single-candidate 10–25 Å sweep already indicated.
 
 **Split thickness, with a decomposition check.** With
 `--min-thickness-substrate 18.0 --min-thickness-film 10.8` the cell cuts
 10 Cu / 8 Ni layers exactly as requested, and γ_int = 0.0573 J/m² —
-between the two uniform values (0.0573 at 10.8/10.8, 0.0621 at
-18.0/18.0) and close to the film side, because γ_int's thickness
-dependence comes almost entirely from the Ni side. The informative
-part: the split run's γ_Cu (1.4978) is **digit-identical** to the
-uniform 18.0 Å group (10 Cu layers) and its γ_Ni (1.9181) to the
-uniform 10.8 Å group (8 Ni layers). Each side's surface energy depends
-only on that side's layer count — the decomposition the coherent
-reference state is designed to guarantee, now numerically confirmed in
-a split configuration. The per-side knob is not merely settable; it is
-physically self-consistent.
+level with the uniform 10.8/10.8 value (0.0573, in fact identical
+candidate-by-candidate) and well below the uniform 18.0/18.0 value
+(0.0622), because γ_int's thickness dependence comes almost entirely
+from the Ni side. The informative part: the split run's γ_Cu is
+**identical candidate-by-candidate** to the uniform 18.0 Å group (both
+10 Cu layers: 1.4978 / 1.4979 / 1.4979 / 1.4979) and its γ_Ni to the
+uniform 10.8 Å group (both 8 Ni layers: 1.9181 throughout). Each side's
+surface energy depends only on that side's layer count — the
+decomposition the coherent reference state is designed to guarantee,
+now numerically confirmed in a split configuration. The per-side knob
+is not merely settable; it is physically self-consistent.
 
 **Only γ_int needs convergence control.** Across 6 → 12 Cu layers γ_Cu
-moves 0.0002 J/m², and γ_Ni 0.0004 J/m² over 8 → 14 layers, while γ_int
-moves 0.0048 J/m² over the same interval — 10–20× more; under vacuum
+moves 0.0002 J/m² and γ_Ni 0.0004 J/m² over 8 → 14 layers, while γ_int
+moves 0.0049 J/m² over the same interval — 12–25× more; under vacuum
 changes none of the three move at all. This quantifies §9's claim that
 γ_int is the weakest number in the ledger: it must be reported together
 with its convergence settings.
