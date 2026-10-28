@@ -500,6 +500,15 @@ never asserts dummy forces.
   expected to matter most for γ_int (whose residual scatter §8 already
   attributes to soft-mode convergence rather than precision), has not
   been run.
+  **⚠ The v0.2.1 dtype entry point is silently broken — do not use it for
+  production numbers.** It passed `dtype=` to `mace_mp`, whose parameter
+  is spelled `default_dtype`; the wrong name was absorbed by that helper's
+  `**kwargs`, so a float64 request returned a float32 model with no error
+  and no warning, while `metadata.yaml` still recorded `dtype: float64`.
+  The fix (PR #17) renames the kwarg and makes the mock spell the real
+  signature so a wrong name fails loudly instead of silently. Until a
+  release containing that fix is published, `--dtype float64` produces
+  float32 numbers under a float64 label.
 - **γ_Cu and γ_Ni are orientation- and strain-specific.** The Ni value
   is for Ni stretched onto Cu, and neither number is the
   experimentally-quoted (orientation-averaged) surface energy.
