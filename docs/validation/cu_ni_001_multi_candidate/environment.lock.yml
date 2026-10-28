@@ -1,5 +1,5 @@
 # Environment lock for the multi-candidate Cu(001)|Ni(001) benchmark
-# in this directory (run_id e377717853, 2026-10-28).
+# in this directory (two runs, identical environment, only --fmax differs).
 # Distilled from provenance_extra.yaml (post-hoc, by eng-a-2) and README.md §8.
 # The script-emitted metadata.yaml records pymatgen as "unknown"; the actual
 # installed version below comes from the post-hoc provenance record.
@@ -28,10 +28,23 @@ model:
   weight_size_mb: 44.42
   weight_url: https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model
 
-run:
-  run_id: e377717853
-  seed: 0
-  wall_clock: 24m 50s (2026-10-28 08:15:31 -> 08:40:21)
+# Both runs below share the environment described above (same machine,
+# same commit 92dc284, same weights, same seed, same 10 candidates); the
+# only difference is the FIRE force tolerance.
+runs:
+  - run_id: e377717853            # fmax = 0.01 eV/A (root of this directory)
+    seed: 0
+    fmax: 0.01
+    wall_clock: 24m 50s (2026-10-28 08:15:31 -> 08:40:21)
+    candidates_csv_sha256: 27f77756b595596304573bca9609cd65ee1c32b4ced95327e30c39281876a2fa
+    note: gamma_int biased high (~+0.005 J/m^2 on smallest supercells);
+      superseded by the run below as the benchmark.
+  - run_id: 8a64f9a363            # fmax = 0.002 eV/A (fmax_0002_converged/)
+    seed: 0
+    fmax: 0.002
+    wall_clock: 20m 56s (2026-10-28 09:32:48 -> 09:53:44, from FIRE timestamps)
+    candidates_csv_sha256: f63a01b1f0e4bbb3d3d1815229846319844f46af49d50487af66f9e0a624013c
+    note: converged benchmark; gamma_int median 0.0567 J/m^2, range 0.0002.
 
 # Known environment noise (does not affect results, see README.md §9):
 # - The MACE weight cache landed in d:\MSC.Software\Adams\2018\mace\... because
