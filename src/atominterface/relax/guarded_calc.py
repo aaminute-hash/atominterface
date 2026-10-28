@@ -23,6 +23,16 @@ if TYPE_CHECKING:
 
     from ase.atoms import Atoms
 
+#: Default disagreement threshold for :class:`CommitteeWatcher`, in eV/A.
+#: Calibrated on Cu/Ni interfaces with two MACE-MP-0 variants (medium as
+#: primary, small as committee member): in-distribution disagreement
+#: measured 0.030-0.068 eV/A and genuinely out-of-distribution geometries
+#: (volume compression, species substitution) 0.4-0.66 eV/A.  0.15 sits
+#: above the in-distribution band (about 2x its worst case) and well
+#: below the OOD band, so a real excursion trips the committee while
+#: model-to-model noise does not.
+DEFAULT_COMMITTEE_THRESHOLD = 0.15
+
 
 @dataclass
 class RelaxResult:
@@ -53,6 +63,7 @@ class GuardedRelaxer:
         fmax: float = 0.05,
         max_steps: int = 500,
         ood_threshold: float = 0.8,
+        committee_threshold: float | None = None,
         watchers: Sequence[Callable] | None = None,
         committee_calculators: Sequence | None = None,
         quarantine_dir: str | Path = "./flagged",
@@ -64,6 +75,18 @@ class GuardedRelaxer:
         self.fmax = fmax
         self.max_steps = max_steps
         self.ood_threshold = ood_threshold
+        # Committee disagreement is an absolute force spread in eV/A, not
+        # a dimensionless [0, 1] heuristic, so it carries its own
+        # threshold: judging it against ``ood_threshold`` (calibrated for
+        # ForceNormWatcher) left it untriggerable at the default, because
+        # real disagreement between two MACE-MP-0 variants measures
+        # 0.4-0.66 eV/A on OOD geometries -- far below 0.8.  ``None``
+        # resolves to the calibrated DEFAULT_COMMITTEE_THRESHOLD.
+        self.committee_threshold = (
+            DEFAULT_COMMITTEE_THRESHOLD
+            if committee_threshold is None
+            else float(committee_threshold)
+        )
         # Extra calculators whose forces form the disagreement
         # committee.  Only the default chain gains a CommitteeWatcher;
         # an explicitly passed ``watchers`` chain is respected verbatim
@@ -155,7 +178,7 @@ class GuardedRelaxer:
                 result.reasons.append("non_finite_ood_score")
                 return False
             result.max_ood_score = max(result.max_ood_score, float(watch.score))
-            if watch.score < self.ood_threshold:
+            if watch.score < self._threshold_for(watch):
                 return True
             result.ood_triggered = True
             result.ood_step = step
@@ -315,6 +338,24 @@ class GuardedRelaxer:
             return LBFGS(atoms)
         raise ValueError(f"unknown optimizer {self.optimizer!r}")
 
+    def _threshold_for(self, watch: WatchResult) -> float:  # noqa: D401
+        """Threshold the winning watcher's score is judged against.
+
+        Committee disagreement is an absolute force spread in eV/A;
+        every other watcher scores a dimensionless [0, 1] heuristic
+        calibrated against ``ood_threshold``.  One shared number cannot
+        serve both: measured disagreement between two MACE-MP-0
+        variants sits at 0.03-0.07 eV/A in distribution and 0.4-0.66
+        eV/A on genuinely OOD geometries, so the 0.8 default (meant for
+        ForceNormWatcher) let every realistic excursion pass.  The
+        committee is therefore judged against its own, physically
+        readable ``committee_threshold``; the remaining watchers keep
+        ``ood_threshold`` unchanged.
+        """
+        if watch.meta.get("winning_watcher") == CommitteeWatcher.__name__:
+            return self.committee_threshold
+        return self.ood_threshold
+
     def _aggregate(self, atoms, forces: np.ndarray) -> WatchResult:  # noqa: D401
         # Keep every watcher's full result: the reason reported for the
         # winning watcher must come from that same watcher.  The old
@@ -342,6 +383,13 @@ class GuardedRelaxer:
             for res in results:
                 for key, value in res.meta.items():
                     meta.setdefault(key, value)
+            # Name the winning watcher so the guard can route the
+            # threshold: committee disagreement is measured in eV/A and
+            # is judged against ``committee_threshold``, every other
+            # watcher against ``ood_threshold``.  Purely additive -- the
+            # score, reason, per_atom signal and the meta precedence
+            # above are unchanged.
+            meta["winning_watcher"] = type(self.watchers[idx]).__name__
             return WatchResult(
                 score=float(scores[idx]),
                 reason=best.reason,
