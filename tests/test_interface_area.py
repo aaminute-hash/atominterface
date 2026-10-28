@@ -10,6 +10,7 @@ unresolved mismatch: that would make a real disagreement look handled.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import pytest
@@ -280,7 +281,10 @@ def test_interface_areas_is_a_frozen_record():
 
 
 def _candidate(**overrides) -> Candidate:
-    values = dict(
+    # ``Any`` values: the helper forwards heterogeneous overrides into
+    # ``Candidate(**...)``, and a concrete union would make the unpack
+    # fail the per-parameter type checks below.
+    values: dict[str, Any] = dict(
         atoms=None,
         interface_id="test:0-0",
         builder_name="coherent",

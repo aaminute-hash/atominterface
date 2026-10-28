@@ -16,6 +16,8 @@ from typer.testing import CliRunner
 from atominterface import __version__, cli_build
 from atominterface.builders.base import Candidate
 from atominterface.cli import app
+from atominterface.relax import RelaxResult
+from atominterface.run_config import load_run_config
 
 runner = CliRunner()
 
@@ -469,6 +471,174 @@ def test_legacy_builder_no_candidates_keeps_preview_advice(capsys):
     builder = SimpleNamespace(preview_matches=lambda limit: [match])
     cli_build._report_no_candidates(builder, max_strain=0.05, max_area=100)
     assert "Re-run with --max-strain 0.06" in capsys.readouterr().out
+
+
+def _relax_candidate():
+    """One fake candidate for the ``--relax`` wiring tests."""
+    return Candidate(
+        atoms=Atoms("Cu2", positions=[[0, 0, 2], [0, 0, 4]], cell=[3, 3, 10]),
+        interface_id="fake-1",
+        builder_name="coherent",
+        substrate_formula="Cu",
+        film_formula="Cu",
+        substrate_miller=(0, 0, 1),
+        film_miller=(0, 0, 1),
+        area=9,
+        n_substrate=1,
+        n_film=1,
+        metadata={"charge_analysis": None},
+    )
+
+
+def _valid_relax_result(atoms) -> RelaxResult:
+    """A converged, valid RelaxResult: keeps ``build`` off the exit-2 path."""
+    return RelaxResult(
+        atoms=atoms,
+        n_steps=1,
+        converged=True,
+        valid=True,
+        energies_finite=True,
+        forces_finite=True,
+        final_energy=0.0,
+        metadata={"committee_enabled": False, "ood_monitoring": "heuristics_only"},
+    )
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--committee-backend", "dummy,dummy"],
+        ["--committee-backend", "dummy", "--committee-backend", "dummy"],
+    ],
+)
+def test_build_wires_committee_backends_into_from_calculators(
+    fake_build, tmp_path, monkeypatch, flags
+):
+    """--committee-backend mounts the extra models via from_calculators.
+
+    ``dummy`` is the only backend name that validates without optional
+    heavy dependencies; the pair exercises the two accepted spellings
+    (comma-separated and repeated).
+    """
+    fake_build.candidates = [_relax_candidate()]
+    captured: list = []
+
+    class _FakeRelaxer:
+        def run(self, atoms):
+            return _valid_relax_result(atoms)
+
+    def fake_from_calculators(calculators, *, primary=0, **kw):
+        captured.append((list(calculators), primary, kw))
+        return _FakeRelaxer()
+
+    monkeypatch.setattr(
+        "atominterface.relax.GuardedRelaxer.from_calculators", fake_from_calculators
+    )
+    monkeypatch.setattr(
+        "atominterface.backends.get_calculator",
+        lambda name, **kwargs: lambda atoms: SimpleNamespace(backend=name),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "build",
+            "sub.cif",
+            "film.cif",
+            "--relax",
+            "--backend",
+            "dummy",
+            *flags,
+            "--outdir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, _combined_output(result)
+    calcs, primary, kw = captured[0]
+    assert primary == 0
+    assert len(calcs) == 3  # primary factory + two resolved committee members
+    assert [member.backend for member in calcs[1:]] == ["dummy", "dummy"]
+    assert kw["fmax"] == 0.05
+    assert kw["max_steps"] == 200
+    assert kw["ood_threshold"] == 0.8
+    assert kw["quarantine_dir"] == str(tmp_path / "flagged")
+    # The CLI does not override the calibrated committee threshold.
+    assert "committee_threshold" not in kw
+    assert "committee backend(s): dummy, dummy" in result.output
+
+
+def test_build_without_committee_backend_keeps_direct_construction(
+    fake_build, tmp_path, monkeypatch
+):
+    """No --committee-backend: the historical direct GuardedRelaxer path."""
+    fake_build.candidates = [_relax_candidate()]
+    created: list = []
+
+    class _RecordingRelaxer:
+        def __init__(self, calculator, **kwargs):
+            created.append((calculator, kwargs))
+
+        @classmethod
+        def from_calculators(cls, calculators, *, primary=0, **kwargs):
+            raise AssertionError("from_calculators must not be used without --committee-backend")
+
+        def run(self, atoms):
+            return _valid_relax_result(atoms)
+
+    monkeypatch.setattr("atominterface.relax.GuardedRelaxer", _RecordingRelaxer)
+    monkeypatch.setattr(
+        "atominterface.backends.get_calculator",
+        lambda name, **kwargs: lambda atoms: SimpleNamespace(backend=name),
+    )
+    result = runner.invoke(
+        app, ["build", "sub.cif", "film.cif", "--relax", "--outdir", str(tmp_path)]
+    )
+    assert result.exit_code == 0, _combined_output(result)
+    assert len(created) == 1
+    calculator, kwargs = created[0]
+    assert not isinstance(calculator, list)  # a single primary, not a committee list
+    assert "committee_calculators" not in kwargs
+    assert kwargs["ood_threshold"] == 0.8
+    assert "committee backend(s)" not in _combined_output(result)
+
+
+def test_build_rejects_unknown_committee_backend(fake_build):
+    result = runner.invoke(app, ["build", "sub.cif", "film.cif", "--committee-backend", "nope"])
+    assert result.exit_code == 2
+    assert "unknown backend" in _combined_output(result)
+    assert fake_build.loads == []
+
+
+def test_build_records_committee_backend_in_run_config(fake_build, tmp_path):
+    """The effective committee list is recorded and an empty value disables it."""
+    result = runner.invoke(
+        app,
+        [
+            "build",
+            "sub.cif",
+            "film.cif",
+            "--committee-backend",
+            "dummy, dummy",
+            "--outdir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, _combined_output(result)
+    assert load_run_config(tmp_path / "run_config.yaml")["committee_backend"] == ["dummy", "dummy"]
+
+    empty = runner.invoke(
+        app,
+        [
+            "build",
+            "sub.cif",
+            "film.cif",
+            "--committee-backend",
+            "",
+            "--outdir",
+            str(tmp_path / "empty"),
+        ],
+    )
+    assert empty.exit_code == 0, _combined_output(empty)
+    assert load_run_config(tmp_path / "empty" / "run_config.yaml")["committee_backend"] == []
 
 
 def test_help_and_version_without_pymatgen():
