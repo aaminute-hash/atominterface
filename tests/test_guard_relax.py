@@ -12,7 +12,11 @@ from atominterface.physics import (
     transform_forces,
     transform_stress_voigt,
 )
-from atominterface.relax.guarded_calc import GuardedRelaxer, RelaxResult
+from atominterface.relax.guarded_calc import (
+    DEFAULT_COMMITTEE_THRESHOLD,
+    GuardedRelaxer,
+    RelaxResult,
+)
 from atominterface.relax.quarantine import cut_cluster, write_dft_input
 from atominterface.relax.watchers import (
     CommitteeWatcher,
@@ -534,6 +538,175 @@ def test_guarded_relaxer_committee_argmax_on_any_stop_on(tmp_path):
     assert result.reasons == ["committee_disagreement"]
     assert result.quarantine_path != ""
     assert list(tmp_path.iterdir())
+
+
+# ------------------------------------------------------------------
+# Committee threshold routing
+#
+# Committee disagreement is an absolute force spread in eV/A, while
+# every other watcher scores a dimensionless [0, 1] heuristic.  The
+# guard used to judge both against the single ``ood_threshold``
+# (calibrated for ForceNormWatcher), which left the committee
+# untriggerable at its default: measured in-distribution disagreement
+# on Cu/Ni interfaces is 0.030-0.068 eV/A and real OOD 0.4-0.66 eV/A,
+# both far below 0.8.  ``committee_threshold`` gives the committee its
+# own, physically readable threshold.
+# ------------------------------------------------------------------
+def _member_for_disagreement(target: float) -> _CalcWith:
+    """A committee member whose disagreement with zero primary forces is ``target``.
+
+    With a single member the per-component spread of ``{0, c}`` is
+    ``c/2``, so the mean per-atom norm of the spread is ``c*sqrt(3)/2``;
+    invert that for the requested disagreement in eV/A.
+    """
+    return _CalcWith(np.full((5, 3), 2.0 * target / np.sqrt(3.0)))
+
+
+def test_committee_threshold_defaults_to_calibrated_value():
+    relaxer = GuardedRelaxer(calculator=get_calculator("dummy"))
+    assert relaxer.committee_threshold == DEFAULT_COMMITTEE_THRESHOLD
+    assert relaxer.committee_threshold == 0.15
+
+
+def test_committee_threshold_explicit_value_is_respected():
+    relaxer = GuardedRelaxer(calculator=get_calculator("dummy"), committee_threshold=0.42)
+    assert relaxer.committee_threshold == 0.42
+
+
+def test_from_calculators_forwards_committee_threshold():
+    relaxer = GuardedRelaxer.from_calculators(
+        [_CalcWith(np.zeros((5, 3))), _CalcWith(np.zeros((5, 3)))], committee_threshold=0.2
+    )
+    assert relaxer.committee_threshold == 0.2
+
+
+def test_committee_threshold_none_matches_explicit_default(tmp_path):
+    """``None`` resolves to the same calibrated 0.15 as passing it outright."""
+    atoms = make_atoms(5)
+    member = _member_for_disagreement(0.4)
+
+    def run(committee_threshold, subdir: str):
+        relaxer = GuardedRelaxer(
+            calculator=_CalcWith(np.zeros((5, 3))),
+            committee_calculators=[member],
+            committee_threshold=committee_threshold,
+            max_steps=5,
+            quarantine_dir=tmp_path / subdir,
+        )
+        return relaxer.run(atoms)
+
+    implicit, explicit = run(None, "implicit"), run(0.15, "explicit")
+    assert implicit.ood_triggered is explicit.ood_triggered is True
+    assert implicit.ood_step == explicit.ood_step
+    assert implicit.max_ood_score == pytest.approx(explicit.max_ood_score)
+    assert implicit.reasons == explicit.reasons
+
+
+def test_committee_in_distribution_disagreement_does_not_trigger(tmp_path):
+    """0.034 eV/A: the measured in-distribution baseline stays silent."""
+    atoms = make_atoms(5)
+    relaxer = GuardedRelaxer(
+        calculator=_CalcWith(np.zeros((5, 3))),
+        committee_calculators=[_member_for_disagreement(0.034)],
+        max_steps=5,
+        quarantine_dir=tmp_path,
+    )
+    result = relaxer.run(atoms)
+    assert result.ood_triggered is False
+    assert result.max_ood_score == pytest.approx(0.034)
+    assert result.converged is True
+    assert result.valid is True
+
+
+def test_committee_ood_level_disagreement_triggers(tmp_path):
+    """0.4 eV/A: the measured real-OOD level fires, blamed on the committee."""
+    atoms = make_atoms(5)
+    relaxer = GuardedRelaxer(
+        calculator=_CalcWith(np.zeros((5, 3))),
+        committee_calculators=[_member_for_disagreement(0.4)],
+        max_steps=5,
+        quarantine_dir=tmp_path,
+    )
+    result = relaxer.run(atoms)
+    assert result.ood_triggered is True
+    assert result.ood_step >= 0
+    assert result.max_ood_score == pytest.approx(0.4)
+    assert result.reasons == ["committee_disagreement"]
+    assert result.metadata["committee_state"] == "ok"
+    assert result.metadata["ood_monitoring"] == "committee+heuristics"
+    assert result.quarantine_path != ""
+    assert list(tmp_path.iterdir())  # DFT input written for the cluster
+
+
+def test_shared_threshold_masked_the_committee_that_now_fires(tmp_path):
+    """The fix, as an assertion: one structure, two threshold regimes.
+
+    Under the old shared-threshold behaviour -- the committee judged
+    against ``ood_threshold=0.8``, a number calibrated for
+    ForceNormWatcher -- a 0.4 eV/A disagreement, the level real OOD
+    geometries produce, passed silently and the run was certified
+    valid.  With the committee's own 0.15 eV/A threshold the very same
+    structure stops the relaxation and quarantines.
+    """
+    atoms = make_atoms(5)
+
+    def run(committee_threshold, subdir: str):
+        relaxer = GuardedRelaxer(
+            calculator=_CalcWith(np.zeros((5, 3))),
+            committee_calculators=[_member_for_disagreement(0.4)],
+            ood_threshold=0.8,
+            committee_threshold=committee_threshold,
+            max_steps=5,
+            quarantine_dir=tmp_path / subdir,
+        )
+        return relaxer.run(atoms)
+
+    old = run(0.8, "shared")  # committee judged against the ForceNormWatcher number
+    new = run(None, "committee")  # committee judged against its own 0.15
+    assert old.ood_triggered is False
+    assert old.valid is True
+    assert new.ood_triggered is True
+    assert new.valid is False
+    assert new.reasons == ["committee_disagreement"]
+
+
+def test_non_committee_winner_keeps_ood_threshold(tmp_path):
+    """Routing is per-winner: a loud heuristic is still judged against 0.8.
+
+    A custom watcher scoring 0.5 outranks a 0.034 eV/A committee, so
+    the argmax winner is the heuristic -- and 0.5 < 0.8 must not stop
+    the run even though 0.5 exceeds committee_threshold.
+    """
+    atoms = make_atoms(5)
+
+    class _LoudWatcher:
+        def __call__(self, atoms, forces):
+            return WatchResult(score=0.5, reason="loud_heuristic")
+
+    relaxer = GuardedRelaxer(
+        calculator=_CalcWith(np.zeros((5, 3))),
+        watchers=[_LoudWatcher(), CommitteeWatcher([_member_for_disagreement(0.034)])],
+        max_steps=5,
+        quarantine_dir=tmp_path,
+    )
+    result = relaxer.run(atoms)
+    assert result.ood_triggered is False
+    assert result.max_ood_score == pytest.approx(0.5)
+
+
+def test_aggregate_names_the_winning_watcher():
+    """The threshold router reads the winner's name off the aggregate."""
+    atoms = make_atoms(5)
+    with_committee = GuardedRelaxer(
+        calculator=_CalcWith(np.zeros((5, 3))),
+        committee_calculators=[_CalcWith(np.ones((5, 3)) * 0.5)],
+    )
+    watch = with_committee._aggregate(atoms, np.zeros((5, 3)))
+    # disagreement = 0.5*sqrt(3)/2 ~ 0.433 eV/A, the only non-zero score
+    assert watch.meta["winning_watcher"] == "CommitteeWatcher"
+    plain = GuardedRelaxer(calculator=get_calculator("dummy"))
+    forces = np.ones((5, 3)) * (90.0 / np.sqrt(3.0))
+    assert plain._aggregate(atoms, forces).meta["winning_watcher"] == "ForceNormWatcher"
 
 
 # ------------------------------------------------------------------
