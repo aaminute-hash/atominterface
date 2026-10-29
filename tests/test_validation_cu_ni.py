@@ -25,6 +25,7 @@ import sys
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pytest
 from ase.build import bulk
 from ase.calculators.calculator import Calculator
@@ -124,7 +125,7 @@ def test_coherent_bulk_energy_recovers_the_parabola_minimum(example03):
     nearest = min(abs(grid_start + i * step - centre) for i in range(grid_n))
     assert nearest < step
     value = example03._coherent_bulk_energy(
-        atoms, 0.0, _factory(reference, centre=centre, floor=floor)
+        atoms, 0.0, _factory(reference, centre=centre, floor=floor), (0, 0, 1)
     )
     assert value == pytest.approx(floor, abs=1e-9)
 
@@ -135,7 +136,7 @@ def test_coherent_bulk_energy_applies_the_in_plane_strain(example03):
     reference = atoms.get_cell().copy()
     strain, slope, floor = STRAIN_FILM_EXPECTED, 4.0, -7.5
     value = example03._coherent_bulk_energy(
-        atoms, strain, _factory(reference, floor=floor, slope=slope)
+        atoms, strain, _factory(reference, floor=floor, slope=slope), (0, 0, 1)
     )
     # The in-plane term is linear in the strain and constant along sz, so
     # the fitted minimum is the parabola floor shifted by slope * strain.
@@ -152,9 +153,131 @@ def test_coherent_bulk_energy_survives_a_cell_independent_calculator(example03):
     from atominterface.backends import get_calculator
 
     atoms = bulk("Cu", "fcc", a=3.61, cubic=True)
-    value = example03._coherent_bulk_energy(atoms, 0.0, get_calculator("dummy"))
+    value = example03._coherent_bulk_energy(atoms, 0.0, get_calculator("dummy"), (0, 0, 1))
     assert math.isfinite(value)
     assert value == pytest.approx(0.001 * len(atoms))
+
+
+# ------------------------------------------------------------------
+# which plane the in-plane strain is equibiaxial *in*
+# ------------------------------------------------------------------
+#: (miller, in-plane strain, out-of-plane strain) probing the tensor.
+ORIENTATIONS = ((0, 0, 1), (1, 1, 1), (1, 1, 0))
+STRAIN_IN_PLANE = 0.025823
+STRAIN_OUT_OF_PLANE = -0.03
+
+
+def _in_plane_basis(normal):
+    """Two orthonormal directions spanning the plane orthogonal to ``normal``."""
+    seed = np.array([1.0, 0.0, 0.0])
+    if abs(float(normal[0])) > 0.9:
+        seed = np.array([0.0, 1.0, 0.0])
+    first = np.cross(normal, seed)
+    first /= np.linalg.norm(first)
+    second = np.cross(normal, first)
+    return first, second
+
+
+class _CellRecorder(Calculator):
+    """Records the cell of every structure it is asked about."""
+
+    implemented_properties = ["energy"]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cells: list = []
+
+    def calculate(self, atoms=None, properties=None, system_changes=None):
+        super().calculate(atoms, properties, system_changes)
+        self.cells.append(np.array(self.atoms.get_cell(), dtype=float))
+        self.results = {"energy": 0.0}  # flat profile: every grid point is sampled
+
+
+def _recording_factory():
+    """``(factory, record)`` capturing every cell ``_coherent_bulk_energy`` builds."""
+    record: list = []
+
+    def make(atoms):
+        calculator = _CellRecorder(atoms=atoms)
+        record.append(calculator)
+        return calculator
+
+    return make, record
+
+
+@pytest.mark.parametrize("miller", ORIENTATIONS)
+def test_coherent_bulk_energy_strains_the_surface_plane_not_cartesian_xy(example03, miller):
+    """The reference must strain the (hkl) plane, whatever direction that is.
+
+    Asserted on the cells ``_coherent_bulk_energy`` actually hands to the
+    calculator, not on the tensor helper it calls -- a test that only
+    exercises the helper passes even when the call site has been reverted
+    to the old scaling.
+
+    The defect: scaling the cartesian components as ``(1+e, 1+e, 1+sz)``
+    means "equibiaxial about z", which is only the same thing when the
+    surface normal *is* z.  On fcc (111) it applied a 3.7 % in-plane
+    anisotropy -- some in-plane directions were compressed 1.1 % instead --
+    and even flipped the sign of the normal strain (+0.72 % instead of
+    -3 %), so the fitted reference was not the strained (111) crystal at
+    all and gamma_Ni drifted with layer count instead of converging.
+
+    Pure linear algebra, no real calculator.
+    """
+    atoms = bulk("Cu", "fcc", a=3.61, cubic=True)
+    pristine = np.asarray(atoms.get_cell(), dtype=float)
+    normal = example03._surface_normal(atoms, miller)
+
+    factory, record = _recording_factory()
+    example03._coherent_bulk_energy(atoms, STRAIN_IN_PLANE, factory, miller)
+    cells = [cell for calculator in record for cell in calculator.cells]
+    assert cells, "the reference evaluated no cell at all"
+
+    first, second = _in_plane_basis(normal)
+    for cell in cells:
+        # Recover the deformation: new_cell rows are F @ (pristine rows),
+        # i.e. new_cell = pristine @ F.T.
+        applied = cell.T @ np.linalg.inv(pristine).T
+
+        # The normal must stay a normal: it is stretched, never tilted.
+        # The cartesian scaling fails this outright on (111) and (110).
+        stretched_normal = applied @ normal
+        parallel = np.linalg.norm(np.cross(stretched_normal, normal))
+        assert parallel < 1e-12
+        assert np.dot(stretched_normal, normal) > 0.0  # and never inverted
+
+        # Every in-plane direction is stretched by exactly the in-plane
+        # strain, so the plane carries no anisotropy.
+        for angle in np.linspace(0.0, 2.0 * math.pi, 91):
+            direction = math.cos(angle) * first + math.sin(angle) * second
+            assert abs(direction @ normal) < 1e-12
+            stretched = applied @ direction
+            assert np.linalg.norm(stretched) == pytest.approx(
+                (1.0 + STRAIN_IN_PLANE) * np.linalg.norm(direction), rel=1e-12
+            )
+
+
+def test_biaxial_deformation_reduces_to_axis_scaling_for_001(example03):
+    """(001) bit-compatibility: the tensor is exactly ``diag(1+e, 1+e, 1+sz)``.
+
+    The published (001) gamma values run through this reference, so the
+    general form has to collapse onto the old cartesian scaling rather
+    than merely approximate it.
+    """
+    atoms = bulk("Cu", "fcc", a=3.61, cubic=True)
+    normal = example03._surface_normal(atoms, (0, 0, 1))
+    assert np.array_equal(normal, np.array([0.0, 0.0, 1.0]))
+
+    deformation = example03._biaxial_deformation(normal, STRAIN_IN_PLANE, STRAIN_OUT_OF_PLANE)
+    expected = np.diag([1.0 + STRAIN_IN_PLANE, 1.0 + STRAIN_IN_PLANE, 1.0 + STRAIN_OUT_OF_PLANE])
+    assert np.array_equal(deformation, expected)
+
+    # ...and the cell it produces is bit-identical to the old column scaling.
+    base_cell = np.asarray(atoms.get_cell(), dtype=float)
+    column_scaling = np.array(
+        [1.0 + STRAIN_IN_PLANE, 1.0 + STRAIN_IN_PLANE, 1.0 + STRAIN_OUT_OF_PLANE]
+    )
+    assert np.array_equal(base_cell @ deformation.T, base_cell * column_scaling)
 
 
 def test_coherent_bulk_energy_recovers_a_minimum_off_the_grid(example03):
@@ -170,9 +293,8 @@ def test_coherent_bulk_energy_recovers_a_minimum_off_the_grid(example03):
     grid_start, grid_stop, grid_n = -0.08, 0.02, 9
     step = (grid_stop - grid_start) / (grid_n - 1)
     sampled = [curvature * (grid_start + i * step - centre) ** 2 + floor for i in range(grid_n)]
-    value = example03._coherent_bulk_energy(
-        atoms, 0.0, _factory(reference, curvature=curvature, centre=centre, floor=floor)
-    )
+    factory = _factory(reference, curvature=curvature, centre=centre, floor=floor)
+    value = example03._coherent_bulk_energy(atoms, 0.0, factory, (0, 0, 1))
     assert value == pytest.approx(floor, abs=1e-9)
     assert value < min(sampled) - 1e-12
 
@@ -242,8 +364,10 @@ def test_coherent_reference_carries_the_film_strain_energy(example03):
 
     e_sub, _ = example03._single_point(substrate_atoms, calculator)
     e_film, _ = example03._single_point(film_atoms, calculator)
-    e_sub_coh = example03._coherent_bulk_energy(substrate_atoms, 0.0, calculator)
-    e_film_coh = example03._coherent_bulk_energy(film_atoms, STRAIN_FILM_EXPECTED, calculator)
+    e_sub_coh = example03._coherent_bulk_energy(substrate_atoms, 0.0, calculator, (0, 0, 1))
+    e_film_coh = example03._coherent_bulk_energy(
+        film_atoms, STRAIN_FILM_EXPECTED, calculator, (0, 0, 1)
+    )
 
     delta_sub = (e_sub_coh - e_sub) / len(substrate_atoms)
     delta_film = (e_film_coh - e_film) / len(film_atoms)

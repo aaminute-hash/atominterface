@@ -466,7 +466,47 @@ def _single_point(atoms, calculator) -> tuple[float, object]:
     return energy, measured
 
 
-def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
+def _surface_normal(atoms, miller) -> np.ndarray:
+    """Cartesian unit normal of the bulk cell's ``(hkl)`` plane.
+
+    Miller indices are coefficients in the *reciprocal* basis:
+    ``normal ∝ h*b1 + k*b2 + l*b3``.  With the cell rows holding the real-space
+    vectors, the reciprocal rows are ``inv(cell).T``, so the same thing is
+    ``inv(cell) @ (h, k, l)``.  Going through the reciprocal basis is what makes
+    this correct for any Bravais lattice -- reading the indices off the
+    cartesian axes only works for an orthorhombic cell whose axes are the basis.
+    """
+    cell = np.asarray(atoms.get_cell(), dtype=float)
+    miller_vector = np.asarray(tuple(int(index) for index in miller), dtype=float)
+    if not np.any(miller_vector):
+        raise ValueError(f"Miller indices must be non-zero, got {tuple(miller)!r}")
+    normal = np.linalg.inv(cell) @ miller_vector
+    length = float(np.linalg.norm(normal))
+    if not np.isfinite(length) or length <= 0:
+        raise ValueError(f"cannot resolve a surface normal for Miller indices {tuple(miller)}")
+    unit_normal: np.ndarray = normal / length
+    return unit_normal
+
+
+def _biaxial_deformation(normal: np.ndarray, strain: float, sz: float) -> np.ndarray:
+    """Deformation gradient for ``strain`` in the plane and ``sz`` along it.
+
+    ``I + e*(I - n n^T) + sz*(n n^T)`` -- the projector onto the interface plane
+    and onto its normal, weighted by the two strains.  This is the tensor the
+    coherent reference needs: an equal-biaxial strain *on the (hkl) plane*,
+    whatever direction that plane happens to point in.
+
+    Scaling cartesian components instead (``(1+e, 1+e, 1+sz)``) silently means
+    "equibiaxial about z", which is only the same thing when the surface normal
+    *is* z.  For fcc (111) it is not: the components then carry a 3.7 %
+    in-plane anisotropy and even flip the sign of the normal strain, which is
+    why gamma_Ni(111) drifted with layer count instead of converging.
+    """
+    projector = np.outer(normal, normal)
+    return np.eye(3) + float(strain) * (np.eye(3) - projector) + float(sz) * projector
+
+
+def _coherent_bulk_energy(atoms, strain, calculator, miller) -> float:
     """Total energy of the bulk under the slab's in-plane strain.
 
     Both reference slabs share the interface's in-plane lattice, so the
@@ -490,9 +530,13 @@ def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
         atoms: Pristine bulk cell (ASE).
         strain: Isotropic in-plane strain carried by the slab
             (``candidate.strain_substrate`` / ``candidate.strain_film``).
+            Applied equally in every direction of the interface plane.
             A general (anisotropic or sheared) match would need the full
-            deformation tensor here; the (001) fcc demo is isotropic.
+            deformation tensor here.
         calculator: Calculator factory shared by the ledger.
+        miller: Miller indices of this side's surface.  They set which
+            plane the in-plane strain is equibiaxial *in*; leaving them
+            out implicitly assumes (001).
 
     Returns:
         Total energy of the strained bulk cell, in eV.
@@ -500,16 +544,16 @@ def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
     import numpy as np
 
     base_cell = np.array(atoms.get_cell(), dtype=float)
+    normal = _surface_normal(atoms, miller)
     grid = np.linspace(-0.08, 0.02, 9)
     energies = []
     for sz in grid:
         strained = atoms.copy()
-        # Cartesian-component scaling: the pristine fcc cell is cubic with
-        # the slab normal along z, so this is exactly (e, e, sz).
-        strained.set_cell(
-            base_cell * np.array([1.0 + strain, 1.0 + strain, 1.0 + float(sz)]),
-            scale_atoms=True,
-        )
+        # Uniform deformation v -> F v.  ASE keeps the lattice vectors in the
+        # rows, so that is ``base_cell @ F.T``; ``scale_atoms=True`` preserves
+        # the fractional coordinates, giving exactly x -> F x.
+        deformation = _biaxial_deformation(normal, strain, sz)
+        strained.set_cell(base_cell @ deformation.T, scale_atoms=True)
         strained.calc = calculator(strained)
         energy = float(strained.get_potential_energy())
         if not np.isfinite(energy):
@@ -806,13 +850,13 @@ def _evaluate_candidate(  # noqa: PLR0912, PLR0915
     if calculator is not None:
         try:
             e_bulk_sub_coh = _coherent_bulk_energy(
-                substrate_atoms, float(candidate.strain_substrate), calculator
+                substrate_atoms, float(candidate.strain_substrate), calculator, args.sub_miller
             )
         except Exception as exc:  # noqa: BLE001
             record_error("bulk_sub_coherent", exc)
         try:
             e_bulk_film_coh = _coherent_bulk_energy(
-                film_atoms, float(candidate.strain_film), calculator
+                film_atoms, float(candidate.strain_film), calculator, args.film_miller
             )
         except Exception as exc:  # noqa: BLE001
             record_error("bulk_film_coherent", exc)
