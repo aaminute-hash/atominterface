@@ -107,11 +107,18 @@ INPLANE_PERIOD_RANGE = 4
 INPLANE_PERIOD_RTOL = 1e-9
 
 #: A cross-interface pair is called on-top when its lateral offset is
-#: under this fraction of the bond scale (5 % of ~2.5 A is ~0.13 A).
-#: Wide enough to catch a stack that merely starts a hair off the
-#: symmetric point, tight enough not to smear the label over ordinary
-#: near-neighbour registries.
-ON_TOP_LATERAL_FRACTION = 0.05
+#: below this (A).  Deliberately a tight absolute bound and not a
+#: fraction of the bond scale: the claim the message makes is that the
+#: in-plane gradient *vanishes by symmetry*, and that is true only at the
+#: symmetric point itself.  A pair 0.1 A off it has a small gradient, not
+#: a vanishing one -- a slow climb out of a shallow basin, which is a
+#: step-budget concern and not a geometry violation.  Saying "symmetric"
+#: about both would make the warning assert something false, which in a
+#: package that sells "no trustworthy-looking output from an untrustworthy
+#: calculation" is worse than missing the second case.  Coherent lateral
+#: offsets are rational fractions of a lattice vector anyway, so they are
+#: either exactly zero or of order a fraction of an angstrom.
+ON_TOP_LATERAL_TOL = 1e-6
 
 # Strains within 1e-4 (0.01 %) of each other are treated as equally good
 # when ranking lattice matches; see ``_match_lattices``.
@@ -1034,6 +1041,12 @@ def _warn_interface_proximity(
     gamma_int comes out 5.9x high on Cu/Ni(111) and 6.3x high on (110).
     That is why the lateral offset is measured and named rather than
     left for the reader to work out.
+
+    The offset is compared against an absolute tolerance, not against a
+    fraction of the bond scale: the gradient vanishes only at the
+    symmetric point, and a pair a fraction of an angstrom off it is a
+    shallow basin rather than a stationary point.  Calling both
+    "symmetric" would make the message assert something false.
     """
     from atominterface.relax.proximity import nearest_image_vectors, pairwise_distance_matrix
 
@@ -1059,11 +1072,14 @@ def _warn_interface_proximity(
     separation = vectors[n_substrate + j]
     lateral_vector = separation - float(separation @ normal) * normal
     lateral = float(np.linalg.norm(lateral_vector))
-    solved = np.linalg.lstsq(cell[:2].T, lateral_vector, rcond=None)[0]
-    # ``or 0.0`` normalises a negative zero, so an exactly opposed pair
-    # reads "du=0.000000" rather than "du=-0.000000".
-    du, dv = (float(value) or 0.0 for value in solved)
-    on_top = lateral <= ON_TOP_LATERAL_FRACTION * min(measured)
+    # Rounded to the precision the message prints, then ``+ 0.0`` to turn
+    # the -0.0 a tiny negative component leaves behind into +0.0: an
+    # exactly opposed pair has to read "du=0.000000", because "du=-0.000000"
+    # invites the reader to go looking for an offset that is not there.
+    fit = np.linalg.lstsq(cell[:2].T, lateral_vector, rcond=None)[0]
+    du = float(np.round(fit[0], 6)) + 0.0
+    dv = float(np.round(fit[1], 6)) + 0.0
+    on_top = lateral <= ON_TOP_LATERAL_TOL
 
     warnings.warn(
         f"[geometry gate] criterion D (interface proximity) on the assembled interface: "
@@ -1076,12 +1092,16 @@ def _warn_interface_proximity(
         "the join is the gap you asked for and will relax apart; a pair inside one board "
         "means the two sides were pushed into each other. Read w before acting."
         + (
-            " This pair is also on top of its counterpart (near-zero lateral offset), i.e. "
-            "on-top registry: such a stack sits on a mirror-symmetric stationary point "
-            "whose in-plane gradient vanishes by symmetry, so a relaxation can converge "
-            "there and stay -- it relaxes, passes OOD and looks numerically healthy while "
-            "gamma_int reads 5.9x high on Cu/Ni(111) and 6.3x high on (110). Break the "
-            "symmetry: change the initial registry or the thickness step."
+            " This pair is exactly opposed -- zero lateral offset, i.e. on-top registry. "
+            "Such a stack sits on a mirror-symmetric stationary point whose in-plane "
+            "gradient vanishes by symmetry, so a relaxation can converge there and stay: "
+            "it relaxes, passes OOD and looks numerically healthy while gamma_int reads "
+            "5.9x high on Cu/Ni(111) (at 14.4 A: 7 Cu against 8 Ni layers leaves the join "
+            "on-top and the optimizer stops after a single step) and 6.3x high on (110). "
+            "Break the symmetry with any one of: shifting the initial registry; changing "
+            "the thickness step so both sides get the same layer count (the 7/8 asymmetry "
+            "above is what made the on-top site a stationary point); or running an "
+            "explicit registry scan."
             if on_top
             else ""
         ),

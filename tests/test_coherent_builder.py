@@ -955,9 +955,12 @@ def test_geometry_gate_warning_filtered_above_is_asserted_here():
     assert proximity, "on-top stacking at the default gap went unreported"
 
     message = str(proximity[0].message)
-    # Same elements every gate message carries.
+    # Same elements every gate message carries.  Pinned individually: a
+    # message element nothing asserts on is an element that can be
+    # dropped without a single test noticing.
     assert "criterion D" in message
     assert "contact scale" in message
+    assert "requested gap" in message
     assert "u=" in message and "v=" in message and "w=" in message
     # ...and the one that makes this pair interesting: it is directly
     # opposed, i.e. a candidate symmetry-locked registry rather than a
