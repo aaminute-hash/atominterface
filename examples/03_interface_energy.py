@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""End-to-end interface formation energy: Cu(001) | Ni(001).
+"""End-to-end interface formation energy: Cu(hkl) | Ni(hkl).
+
+The orientation is a flag: ``--sub-miller`` / ``--film-miller`` take any
+Miller triple and default to (0, 0, 1), the documented Cu(001) | Ni(001)
+reference.  Every other surface runs the same chain.
 
 Runs the full energy ledger behind an interface formation energy, with
 one calculator setting (same backend, same device) for every term:
@@ -57,6 +61,7 @@ Run:
     python examples/03_interface_energy.py --backend mace --device cpu
     python examples/03_interface_energy.py --backend mace --dtype float64 --fmax 0.01
     python examples/03_interface_energy.py --min-thickness-substrate 18.0 --min-thickness-film 14.4
+    python examples/03_interface_energy.py --sub-miller 1 1 1 --film-miller 1 1 1
 
 Fail-closed demonstration (non-zero exit, empty gamma cells):
     python examples/03_interface_energy.py --backend dummy --max-steps 1 --fmax 1e-6
@@ -319,7 +324,10 @@ class EnergyLedger:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the demo's command line (mirrors ``atominterface build``)."""
     parser = argparse.ArgumentParser(
-        description="Cu(001) | Ni(001) interface formation energy, end to end."
+        description=(
+            "Cu/Ni interface formation energy, end to end. The orientation is set by "
+            "--sub-miller/--film-miller and defaults to the documented Cu(001) | Ni(001)."
+        )
     )
     parser.add_argument(
         "--backend",
@@ -372,6 +380,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--vacuum", type=float, default=15.0, help="vacuum padding in A.")
     parser.add_argument("--max-candidates", type=int, default=1, help="keep at most N candidates.")
+    parser.add_argument(
+        "--sub-miller",
+        type=int,
+        nargs=3,
+        metavar=("H", "K", "L"),
+        default=SUBSTRATE_MILLER,
+        help=(
+            "Miller indices of the substrate surface, as three integers. "
+            "Default %(default)s, the documented Cu(001) reference; "
+            "'--sub-miller 1 1 1' switches the substrate side to (111)."
+        ),
+    )
+    parser.add_argument(
+        "--film-miller",
+        type=int,
+        nargs=3,
+        metavar=("H", "K", "L"),
+        default=FILM_MILLER,
+        help=(
+            "Miller indices of the film surface, as three integers. "
+            "Default %(default)s, the documented Ni(001) reference."
+        ),
+    )
     parser.add_argument(
         "--fmax",
         type=float,
@@ -442,7 +473,70 @@ def _single_point(atoms, calculator) -> tuple[float, object]:
     return energy, measured
 
 
-def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
+def _miller_label(miller) -> str:
+    """``(hkl)`` as the conventional parenthesised triple, for banners.
+
+    Negative indices are written with a leading minus rather than an
+    overbar: unambiguous in a terminal, and it round-trips through a
+    copy-paste back into ``--sub-miller``.
+    """
+    return "(" + "".join(str(int(index)) for index in miller) + ")"
+
+
+def _banner(args) -> str:
+    """Opening line of the run, naming the surfaces actually being built.
+
+    Derived from the flags rather than spelled out: ``--sub-miller`` /
+    ``--film-miller`` make (001) one case among many, and a banner stuck
+    on "Cu(001) | Ni(001)" would misdescribe every run it printed above.
+    """
+    return (
+        f"== Cu{_miller_label(args.sub_miller)} | "
+        f"Ni{_miller_label(args.film_miller)} interface formation energy =="
+    )
+
+
+def _surface_normal(atoms, miller) -> np.ndarray:
+    """Cartesian unit normal of the bulk cell's ``(hkl)`` plane.
+
+    Miller indices are coefficients in the *reciprocal* basis:
+    ``normal ∝ h*b1 + k*b2 + l*b3``.  With the cell rows holding the real-space
+    vectors, the reciprocal rows are ``inv(cell).T``, so the same thing is
+    ``inv(cell) @ (h, k, l)``.  Going through the reciprocal basis is what makes
+    this correct for any Bravais lattice -- reading the indices off the
+    cartesian axes only works for an orthorhombic cell whose axes are the basis.
+    """
+    cell = np.asarray(atoms.get_cell(), dtype=float)
+    miller_vector = np.asarray(tuple(int(index) for index in miller), dtype=float)
+    if not np.any(miller_vector):
+        raise ValueError(f"Miller indices must be non-zero, got {tuple(miller)!r}")
+    normal = np.linalg.inv(cell) @ miller_vector
+    length = float(np.linalg.norm(normal))
+    if not np.isfinite(length) or length <= 0:
+        raise ValueError(f"cannot resolve a surface normal for Miller indices {tuple(miller)}")
+    unit_normal: np.ndarray = normal / length
+    return unit_normal
+
+
+def _biaxial_deformation(normal: np.ndarray, strain: float, sz: float) -> np.ndarray:
+    """Deformation gradient for ``strain`` in the plane and ``sz`` along it.
+
+    ``I + e*(I - n n^T) + sz*(n n^T)`` -- the projector onto the interface plane
+    and onto its normal, weighted by the two strains.  This is the tensor the
+    coherent reference needs: an equal-biaxial strain *on the (hkl) plane*,
+    whatever direction that plane happens to point in.
+
+    Scaling cartesian components instead (``(1+e, 1+e, 1+sz)``) silently means
+    "equibiaxial about z", which is only the same thing when the surface normal
+    *is* z.  For fcc (111) it is not: the components then carry a 3.7 %
+    in-plane anisotropy and even flip the sign of the normal strain, which is
+    why gamma_Ni(111) drifted with layer count instead of converging.
+    """
+    projector = np.outer(normal, normal)
+    return np.eye(3) + float(strain) * (np.eye(3) - projector) + float(sz) * projector
+
+
+def _coherent_bulk_energy(atoms, strain, calculator, miller) -> float:
     """Total energy of the bulk under the slab's in-plane strain.
 
     Both reference slabs share the interface's in-plane lattice, so the
@@ -466,9 +560,13 @@ def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
         atoms: Pristine bulk cell (ASE).
         strain: Isotropic in-plane strain carried by the slab
             (``candidate.strain_substrate`` / ``candidate.strain_film``).
+            Applied equally in every direction of the interface plane.
             A general (anisotropic or sheared) match would need the full
-            deformation tensor here; the (001) fcc demo is isotropic.
+            deformation tensor here.
         calculator: Calculator factory shared by the ledger.
+        miller: Miller indices of this side's surface.  They set which
+            plane the in-plane strain is equibiaxial *in*; leaving them
+            out implicitly assumes (001).
 
     Returns:
         Total energy of the strained bulk cell, in eV.
@@ -476,16 +574,16 @@ def _coherent_bulk_energy(atoms, strain: float, calculator) -> float:
     import numpy as np
 
     base_cell = np.array(atoms.get_cell(), dtype=float)
+    normal = _surface_normal(atoms, miller)
     grid = np.linspace(-0.08, 0.02, 9)
     energies = []
     for sz in grid:
         strained = atoms.copy()
-        # Cartesian-component scaling: the pristine fcc cell is cubic with
-        # the slab normal along z, so this is exactly (e, e, sz).
-        strained.set_cell(
-            base_cell * np.array([1.0 + strain, 1.0 + strain, 1.0 + float(sz)]),
-            scale_atoms=True,
-        )
+        # Uniform deformation v -> F v.  ASE keeps the lattice vectors in the
+        # rows, so that is ``base_cell @ F.T``; ``scale_atoms=True`` preserves
+        # the fractional coordinates, giving exactly x -> F x.
+        deformation = _biaxial_deformation(normal, strain, sz)
+        strained.set_cell(base_cell @ deformation.T, scale_atoms=True)
         strained.calc = calculator(strained)
         energy = float(strained.get_potential_energy())
         if not np.isfinite(energy):
@@ -581,8 +679,8 @@ def _build_candidates(substrate, film, args: argparse.Namespace):
     from atominterface.builders import CoherentInterfaceBuilder, CoherentInterfaceConfig
 
     config = CoherentInterfaceConfig(
-        substrate_miller=SUBSTRATE_MILLER,
-        film_miller=FILM_MILLER,
+        substrate_miller=tuple(args.sub_miller),
+        film_miller=tuple(args.film_miller),
         max_area=MAX_AREA,
         gap=GAP,
         min_thickness=args.min_thickness,
@@ -782,13 +880,13 @@ def _evaluate_candidate(  # noqa: PLR0912, PLR0915
     if calculator is not None:
         try:
             e_bulk_sub_coh = _coherent_bulk_energy(
-                substrate_atoms, float(candidate.strain_substrate), calculator
+                substrate_atoms, float(candidate.strain_substrate), calculator, args.sub_miller
             )
         except Exception as exc:  # noqa: BLE001
             record_error("bulk_sub_coherent", exc)
         try:
             e_bulk_film_coh = _coherent_bulk_energy(
-                film_atoms, float(candidate.strain_film), calculator
+                film_atoms, float(candidate.strain_film), calculator, args.film_miller
             )
         except Exception as exc:  # noqa: BLE001
             record_error("bulk_film_coherent", exc)
@@ -1123,7 +1221,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
     substrate, film = _load_bulks()
     substrate_atoms = _to_ase(substrate)
     film_atoms = _to_ase(film)
-    print("== Cu(001) | Ni(001) interface formation energy ==")
+    print(_banner(args))
     print(f"substrate: Cu fcc, a={np.linalg.norm(substrate_atoms.cell[0]):.3f} A")
     print(f"film     : Ni fcc, a={np.linalg.norm(film_atoms.cell[0]):.3f} A")
 

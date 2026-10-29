@@ -3,28 +3,63 @@
 These tests pin the contract the builders rely on: a generated slab is a
 finite board whose atomic planes are spaced by the theoretical
 interplanar distance ``d_hkl`` of its Miller indices, with real vacuum
-above the top plane.  pymatgen re-orients the cell so the surface normal
-is ``cross(a1, a2)`` -- for anything but (001) that is *not* the
-cartesian z axis, so every measurement here projects onto the true
-normal.
+above the top plane.  pymatgen hands back cells whose in-plane vectors
+carry a z component for every surface but (001), so :func:`_orient_slab`
+rotates them level first -- after which ``cross(a1, a2)`` *is* the
+cartesian z axis and the plain ``[:2]`` slices the builders live by are
+exact rather than a silent projection.  The mirror-symmetric route cuts
+and mirrors its own half-board, so it gets the same leveling.
 """
 
 from __future__ import annotations
 
 import math
+import re
+import warnings
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from atominterface.builders.charge import finite_slab_geometry
+from atominterface.builders.charge import finite_slab_geometry, make_symmetric_slab
 from atominterface.builders.coherent import (
     CoherentInterfaceBuilder,
     CoherentInterfaceConfig,
+    GeometryGateError,
+    _check_area_conservation,
+    _check_inplane_period,
     _flatten_terminations,
     _get_terminations,
     _make_slabs,
+    _shortest_inplane_period,
 )
+
+#: Tolerance (A) for "this cell component is zero".  Cell lengths are a few
+#: A, so this is ~1e-10 relative -- far above float64 round-off, far below
+#: any distance the builders care about.
+LEVEL_TOL = 1e-9
+
+#: (miller, interplanar spacing / a, in-plane area / a^2, Cu layers per 14.4 A).
+#: Areas are written analytically rather than as the 4-dp table values
+#: (6.5341 / 5.6587 / 9.2406): comparing against the rounded literal at a
+#: tight relative tolerance is a tautology, not a gate.
+ORIENTATIONS = (
+    ((0, 0, 1), 1 / 2.0, 1 / 2.0, 8),  # a/2 = 1.8075 A, a^2/2 = 6.5341 A^2
+    ((1, 1, 1), 1 / math.sqrt(3.0), math.sqrt(3.0) / 4.0, 7),  # 2.0871 A, 5.6587 A^2
+    ((1, 1, 0), 1 / (2.0 * math.sqrt(2.0)), 1 / math.sqrt(2.0), 12),  # 1.2781 A, 9.2406 A^2
+)
+
+
+def _level_violation(matrix: np.ndarray) -> float:
+    """Largest in-plane part of ``c`` / out-of-plane part of ``a`` or ``b``."""
+    return float(
+        max(
+            abs(matrix[0][2]),
+            abs(matrix[1][2]),
+            abs(matrix[2][0]),
+            abs(matrix[2][1]),
+        )
+    )
 
 
 def _fcc(species: str, a: float):
@@ -97,14 +132,17 @@ def test_generated_slab_carries_real_vacuum_above_the_top_plane(species, a):
     assert geometry["vacuum_reference"] is not None
 
 
-def test_111_slab_spacing_uses_the_oriented_normal_not_cartesian_z():
-    """A skewed (111) cell must be measured along ``cross(a1, a2)``.
+def test_slabs_are_level_so_cartesian_z_is_the_surface_normal():
+    """Every generated slab comes back with ``cross(a, b)`` along ``+z``.
 
-    pymatgen re-orients the cell so the surface normal is the cross
-    product of the in-plane vectors; for fcc (111) that axis is 54.7
-    degrees away from cartesian z.  Sorting by z reports the in-plane
-    lattice constant (3.615 A) instead of the interplanar spacing
-    (a/sqrt(3) = 2.087 A).
+    Before :func:`_orient_slab` re-levels the board, an fcc (111) slab was
+    handed back as ``a = (1.81, 0, -1.81)`` -- the normals sat at 54.7
+    degrees to cartesian z, so slicing ``[:2]`` projected the in-plane
+    vectors onto xy (area 3.2671 instead of 5.6587) and reading heights
+    off ``cart_coords[:, 2]`` reported the in-plane lattice constant
+    (3.615 A) instead of the interplanar spacing (2.087 A).  Every
+    measurement below is done the naive cartesian way on purpose: after
+    the re-leveling those have to agree with the true d_hkl.
     """
     terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 8.0, 15.0))
     slab = terms[0][1]
@@ -112,13 +150,11 @@ def test_111_slab_spacing_uses_the_oriented_normal_not_cartesian_z():
     matrix = np.asarray(slab.lattice.matrix, dtype=float)
     normal = np.cross(matrix[0], matrix[1])
     normal = normal / np.linalg.norm(normal)
-    assert not np.allclose(np.abs(normal), [0.0, 0.0, 1.0], atol=1e-6)
+    assert np.allclose(np.abs(normal), [0.0, 0.0, 1.0], atol=1e-9)
 
+    # The naive z ordering now measures the interplanar spacing.
     cartesian_z = np.asarray(slab.cart_coords, dtype=float)[:, 2]
-    assert np.allclose(np.diff(_plane_levels(slab)), 3.615 / np.sqrt(3.0), atol=1e-3)
-    # The naive z ordering is measurably different -- that is the bug the
-    # projection guards against.
-    assert not np.allclose(
+    assert np.allclose(
         np.diff(np.unique(np.round(cartesian_z, 4))), 3.615 / np.sqrt(3.0), atol=1e-3
     )
 
@@ -310,3 +346,480 @@ def test_per_side_thickness_none_or_positive_passes_validation():
     assert not CoherentInterfaceConfig(
         min_thickness_substrate=3.0, min_thickness_film=9.0
     ).validate()
+
+
+# ---------------------------------------------------------------------------
+# Orientation gates.  Everything below asserts the contract ``_orient_slab``
+# establishes: an oriented slab's normal is exactly +z, so the ``[:2]`` slices
+# every builder makes are exact rather than a projection onto xy.
+# ---------------------------------------------------------------------------
+
+MIN_THICKNESS = 14.4
+#: fcc Cu nearest-neighbour distance, a/sqrt(2) = 2.556191 A -- the 2.5562 in
+#: the acceptance note is this rounded to 4 dp.
+NN_LIMIT = 3.615 / math.sqrt(2.0)
+
+
+@pytest.mark.parametrize(
+    ("miller", "spacing_factor", "area_factor", "expect_layers"),
+    ORIENTATIONS,
+    ids=["001", "111", "110"],
+)
+def test_generated_slab_is_level_along_z(miller, spacing_factor, area_factor, expect_layers):
+    """``cross(a, b)`` must be the cartesian z axis, whatever the surface.
+
+    This is the invariant the rest of the builder chain is built on: the
+    in-plane vectors carry no z component and the vacuum column carries no
+    in-plane part, so ``lattice[:2, :2]`` is the truth and reading heights
+    off ``cart_coords[:, 2]`` is legitimate.
+    """
+    terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), miller, MIN_THICKNESS, 15.0))
+    slab = terms[0][1]
+    matrix = np.asarray(slab.lattice.matrix, dtype=float)
+
+    assert _level_violation(matrix) < LEVEL_TOL
+    normal = np.cross(matrix[0], matrix[1])
+    normal = normal / np.linalg.norm(normal)
+    assert np.allclose(normal, [0.0, 0.0, 1.0], atol=LEVEL_TOL)
+
+
+@pytest.mark.parametrize(
+    ("miller", "spacing_factor", "area_factor", "expect_layers"),
+    ORIENTATIONS,
+    ids=["001", "111", "110"],
+)
+def test_inplane_area_and_spacing_match_the_orientation(
+    miller, spacing_factor, area_factor, expect_layers
+):
+    """True area ``|a x b|`` and true layer spacing ``d_hkl``, per surface.
+
+    The expected values are the textbook fcc ones: the (111) board has
+    ``sqrt(3)/4 a^2 = 5.6587 A^2`` of interface and planes every
+    ``a/sqrt(3) = 2.0871 A`` -- the numbers the projected cell reported as
+    3.2671 A^2 and 3.615 A.
+    """
+    terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), miller, MIN_THICKNESS, 15.0))
+    slab = terms[0][1]
+    matrix = np.asarray(slab.lattice.matrix, dtype=float)
+
+    area = float(np.linalg.norm(np.cross(matrix[0], matrix[1])))
+    assert area == pytest.approx(area_factor * 3.615**2, rel=1e-9)
+
+    levels = np.unique(np.round(np.asarray(slab.cart_coords, dtype=float)[:, 2], 4))
+    gaps = np.diff(levels)
+    assert len(levels) == expect_layers
+    assert np.allclose(gaps, spacing_factor * 3.615, atol=1e-3)
+
+
+@pytest.mark.parametrize(
+    ("miller", "spacing_factor", "area_factor", "expect_layers"),
+    ORIENTATIONS,
+    ids=["001", "111", "110"],
+)
+def test_assembled_interface_keeps_the_orientations_geometry(
+    miller, spacing_factor, area_factor, expect_layers
+):
+    """End to end: the candidate the builder ships carries the same numbers.
+
+    A degraded rebuild would show up here rather than only in the raw
+    slab, because it is ``_assemble_interface`` that re-lays the cell from
+    the in-plane block and pads the vacuum from a z coordinate.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=miller, film_miller=miller, relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    candidates = builder.build_all()
+    assert candidates
+
+    for candidate in candidates[:2]:
+        cell = np.asarray(candidate.atoms.cell.array, dtype=float)
+        assert _level_violation(cell) < LEVEL_TOL
+
+        area = float(np.linalg.norm(np.cross(cell[0], cell[1])))
+        expected_area = (
+            area_factor * 3.615**2 * candidate.metadata["substrate_supercell_multiplicity"]
+        )
+        assert area == pytest.approx(expected_area, rel=1e-9)
+        assert candidate.area == pytest.approx(area, rel=1e-9)
+
+        # No board here is denser than an fcc nearest-neighbour shell: the
+        # shortest lattice period bounds every in-plane atom separation.
+        assert _shortest_inplane_period(cell)[0] >= NN_LIMIT - 1e-6
+
+
+def test_001_area_is_pinned_not_merely_consistent():
+    """Regression lock: the published gamma values are normalised by 6.5341 A^2.
+
+    The area is asserted at its full precision (6.5341125 A^2, i.e.
+    ``a^2/2``) rather than against the rounded 6.5341, because a relative
+    tolerance of 1e-12 against the rounded literal could not be met even
+    before the re-orientation -- it would be a tautology, not a gate.
+    Any drift here moves gamma_Cu, gamma_Ni and gamma_int together.
+    """
+    config = CoherentInterfaceConfig(substrate_miller=(0, 0, 1), film_miller=(0, 0, 1))
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    candidates = builder.build_all()
+    assert candidates
+
+    candidate = candidates[0]
+    assert candidate.metadata["substrate_supercell"] == ((1, 0), (0, 1))
+    assert candidate.area == pytest.approx(6.534112500000001, rel=1e-12)
+    cell = np.asarray(candidate.atoms.cell.array, dtype=float)
+    assert float(np.linalg.norm(np.cross(cell[0], cell[1]))) == pytest.approx(
+        6.534112500000001, rel=1e-12
+    )
+
+
+def test_oriented_slab_keeps_the_finite_slab_provenance():
+    """Re-orienting must not strip the properties the charge layer reads."""
+    terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 8.0, 15.0))
+    slab = terms[0][1]
+
+    assert slab.properties.get("ai_slab_generated") is True
+    geometry = finite_slab_geometry(slab)
+    assert geometry["finite_slab"] is True
+    assert geometry["vacuum_reference"] is not None
+    assert set(slab.site_properties) >= {"bulk_equivalent", "bulk_wyckoff"}
+
+
+# ---------------------------------------------------------------------------
+# Mirror-symmetric boards.  ``make_symmetric_slab`` cuts and mirrors its own
+# half-board, so it needs the same leveling the plain route gets -- and it has
+# to keep doing the charge bookkeeping correctly afterwards.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("miller", ORIENTATIONS, ids=lambda row: f"{row[0]}")
+def test_symmetric_slab_is_level_along_z(miller):
+    """A mirrored board must come back with its true normal along +z too.
+
+    The mirroring helper itself projects onto ``cross(a, b)``, so it is
+    orientation-agnostic -- which means nothing downstream of it will notice
+    if the board it produced is skewed.  Before the leveling was added here
+    an fcc (111) symmetric board carried a 1.807 A skew and a squared-up
+    -3.2671 A^2- cell, and the builder assembled that silently.
+    """
+    result = make_symmetric_slab(_fcc("Cu", 3.615), miller[0], min_thickness=14.4, vacuum=15.0)
+    board = result.structure
+    matrix = np.asarray(board.lattice.matrix, dtype=float)
+
+    assert _level_violation(matrix) < LEVEL_TOL
+    area = float(np.linalg.norm(np.cross(matrix[0], matrix[1])))
+    assert area == pytest.approx(result.area, rel=1e-12)
+    # Layer counting off cartesian z now works, which it did not before:
+    # the skewed cell read 8 planes at 2.0657 A instead of 9 at 2.0871 A.
+    levels = np.unique(np.round(np.asarray(board.cart_coords, dtype=float)[:, 2], 4))
+    gaps = np.diff(levels)
+    assert np.allclose(gaps, miller[1] * 3.615, atol=1e-3)
+
+
+def test_symmetric_111_board_keeps_its_charge_bookkeeping():
+    """Leveling the board must leave the charge layer's verdicts alone.
+
+    ``analyze_charge_polarity`` projects onto ``cross(a, b)``, so the
+    polarity bookkeeping is invariant under the rotation -- this pins it,
+    because the naive way to place the leveling call (after the analysis)
+    would have rebuilt the board with its provenance property stripped.
+    """
+    board = make_symmetric_slab(_fcc("Cu", 3.615), (1, 1, 1), min_thickness=14.4, vacuum=15.0)
+
+    assert board.structure.properties.get("ai_slab_generated") is True
+    geometry = finite_slab_geometry(board.structure)
+    assert geometry["finite_slab"] is True
+    assert geometry["vacuum_reference"] is not None
+    assert board.n_formula_units == pytest.approx(2.25, rel=1e-12)
+
+
+def test_symmetric_interface_candidates_carry_the_true_area():
+    """``symmetric_slabs=True`` through the builder, end to end."""
+    config = CoherentInterfaceConfig(
+        substrate_miller=(1, 1, 1),
+        film_miller=(1, 1, 1),
+        relax_terminations=False,
+        symmetric_slabs=True,
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    candidates = builder.build_all()
+    assert candidates
+
+    area_factor = ORIENTATIONS[1][2]
+    for candidate in candidates[:2]:
+        cell = np.asarray(candidate.atoms.cell.array, dtype=float)
+        assert _level_violation(cell) < LEVEL_TOL
+        expected = area_factor * 3.615**2 * candidate.metadata["substrate_supercell_multiplicity"]
+        assert candidate.area == pytest.approx(expected, rel=1e-9)
+        assert _shortest_inplane_period(cell)[0] >= NN_LIMIT - 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Geometry gate.  Criterion B (area conservation) and criterion C (in-plane
+# period) refuse the structure; criterion D (cross-interface proximity) only
+# warns, because a fresh join sits inside a bond length on purpose and has to
+# be allowed to relax apart.  The gate has no off switch: a geometry that
+# cannot be measured cannot be reported either.
+# ---------------------------------------------------------------------------
+
+
+def _rotate_out_of_level(slab):
+    """The same board, rigidly rotated until ``a`` and ``b`` are not level.
+
+    A rigid rotation leaves every interatomic distance alone -- so
+    criterion C's reference is untouched -- while ``[:2, :2]`` stops being
+    the interface plane and becomes its xy projection.  That is precisely
+    what a board that skipped ``_orient_slab`` looks like downstream.
+    """
+    from pymatgen.core import Lattice, Structure
+
+    target = np.array([1.0, 1.0, 1.0]) / math.sqrt(3.0)
+    axis = np.cross(np.array([0.0, 0.0, 1.0]), target)
+    sine = float(np.linalg.norm(axis))
+    cross_matrix = np.array(
+        [[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]]
+    )
+    rotation = (
+        np.eye(3) + cross_matrix + cross_matrix @ cross_matrix * ((1.0 - target[2]) / sine**2)
+    )
+    matrix = np.asarray(slab.lattice.matrix, dtype=float) @ rotation.T
+    return Structure(Lattice(matrix), [str(entry) for entry in slab.species], slab.frac_coords)
+
+
+@pytest.mark.parametrize("miller", [(1, 1, 1), (1, 1, 0)], ids=["111", "110"])
+def test_non_001_orientation_warns_that_the_registry_was_never_scanned(miller):
+    """A non-(001) run ships one as-built lateral registry, unscanned.
+
+    The geometry gate cannot catch the failure this warns about and must
+    not be stretched to: a board can be level, conserve its area and keep
+    a healthy in-plane period while sitting on a high-symmetry registry.
+    That site has no geometry defect -- its in-plane gradient vanishes by
+    symmetry, so the relaxation simply stops where it started, converged
+    and green and wrong.  Measured on Cu/Ni(110): the default ridge site
+    reads gamma_int = 0.5953 J/m^2 against a scanned 0.088.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=miller, film_miller=miller, relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates
+    # Once per build: the warning is about the orientation the run was
+    # configured with, which every candidate shares.
+    advisory = [w for w in caught if "[orientation]" in str(w.message)]
+    assert len(advisory) == 1
+
+    message = str(advisory[0].message).lower()
+    # The four things the reader has to be told.
+    assert "not (001)" in message
+    assert "gradient vanishes by symmetry" in message
+    assert "0.5953" in message and "6.8x" in message  # the measured consequence
+    assert "registry scan" in message  # the remedy
+    # ...and the one piece of advice that must NOT be given: relaxing
+    # longer was measured not to help, so the message has to say so.
+    assert "900 steps" in message
+
+    # The thickness knob moves the registry, which makes a thickness scan
+    # read like a convergence failure.  10.8 / 14.4 / 18.0 / 21.6 A gave
+    # 0.081 / 0.898 / 0.081 / 0.081 J/m^2 on Cu/Ni(111): an 11x step from
+    # the thickness alone, with nothing sliding during relaxation.
+    assert "0.898" in message and "11x" in message
+
+    # The one number that makes two non-(001) runs comparable at all: the
+    # as-built registry, in A, measured once during assembly.  Asserted
+    # against the value carried on the candidate rather than against a
+    # literal, so the test breaks if the message ever stops quoting the
+    # measured offset and starts quoting a placeholder.
+    # Matched against the un-lowered text: the unit has to stay "A".
+    quoted = re.search(r"as-built lateral offset: ([0-9.]+) A", str(advisory[0].message))
+    assert quoted is not None
+    assert float(quoted.group(1)) == pytest.approx(
+        float(candidates[0].metadata["registry_lateral_offset_ang"]), abs=1e-6
+    )
+
+
+def test_001_orientation_is_not_warned_about():
+    """(001) is silent: the published protocol scanned ten candidates itself.
+
+    This is the exception the non-(001) warning points at, so it needs
+    its own assertion -- otherwise "warn unless (001)" can degrade into
+    "always warn" without anything noticing.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=(0, 0, 1), film_miller=(0, 0, 1), relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates
+    assert [w for w in caught if "[orientation]" in str(w.message)] == []
+
+
+@pytest.mark.parametrize("miller", [(0, 0, 1), (1, 1, 1), (1, 1, 0)], ids=["001", "111", "110"])
+def test_geometry_gate_accepts_every_orientation(miller):
+    """The gate must be silent on the three orientations the CLI exposes."""
+    config = CoherentInterfaceConfig(
+        substrate_miller=miller, film_miller=miller, relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates, "the gate rejected a healthy orientation"
+    assert [w for w in caught if "geometry gate" in str(w.message)] == []
+
+
+def test_area_conservation_gate_fires_when_the_board_is_not_levelled():
+    """Criterion B: a projected in-plane block spans less than the board."""
+    slab = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 14.4, 15.0))[0][1]
+    levelled = np.asarray(slab.lattice.matrix, dtype=float)
+
+    # The levelled board itself is exactly conservative.
+    _check_area_conservation("substrate", levelled, slab, None)
+
+    skewed = _rotate_out_of_level(slab)
+    with pytest.raises(GeometryGateError) as raised:
+        _check_area_conservation("substrate", levelled, skewed, None)
+
+    message = str(raised.value)
+    assert "criterion B" in message
+    assert "substrate side" in message
+    # measured / reference / threshold, all three named.
+    assert "measured in-plane block" in message
+    assert "reference" in message
+    assert "relative deviation" in message
+    assert "1.0e-06" in message
+
+
+def test_inplane_period_gate_also_fires_on_an_unlevelled_board():
+    """Criterion C catches the same board, on a different measurement.
+
+    B is an area, C a length: the projection that costs 42 % of the area
+    is the same one that halves the shortest in-plane period.
+    """
+    slab = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 14.4, 15.0))[0][1]
+    skewed = _rotate_out_of_level(slab)
+
+    with pytest.raises(GeometryGateError, match="criterion C"):
+        _check_inplane_period("substrate", skewed, 0.05)
+
+
+def test_inplane_period_gate_fires_for_an_area_preserving_squash():
+    """A shear that conserves area slips past B and is caught by C.
+
+    Halving ``a`` and doubling ``b`` leaves ``|a x b|`` untouched -- so
+    criterion B is satisfied -- but the board then repeats every 1.278 A
+    while its atoms still sit 2.556 A apart.
+    """
+    from pymatgen.core import Lattice, Structure
+
+    rows = np.array([[1.2780955, 0.0, 0.0], [0.0, 5.112382, 0.0], [0.0, 0.0, 20.0]])
+    squashed = Structure(
+        Lattice(rows),
+        ["Cu", "Cu"],
+        [[0.0, 0.0, 5.0], [0.0, 2.556191, 5.0]],
+        coords_are_cartesian=True,
+    )
+    _check_area_conservation("film", rows, squashed, None)
+
+    with pytest.raises(GeometryGateError) as raised:
+        _check_inplane_period("film", squashed, 0.05)
+
+    message = str(raised.value)
+    assert "criterion C" in message
+    assert "film side" in message
+    assert "threshold" in message
+    # Atom pair: indices, element symbols and fractional coordinates.
+    assert "#0 Cu" in message and "#1 Cu" in message
+    assert "u=" in message and "v=" in message and "w=" in message
+
+
+def test_inplane_period_search_finds_short_combinations_not_just_the_basis():
+    """``min(|a|, |b|)`` is not the period; the enumeration is.
+
+    With ``b = 3a + (0.05, 0.3)`` the basis vectors read 2.556 A and 7.68 A
+    while ``b - 3a`` repeats every 0.304 A.  A gate that took ``|a|`` would
+    call that cell healthy.
+    """
+    basis = np.array([[2.556191, 0.0], [3 * 2.556191 + 0.05, 0.3]])
+    period, m, n = _shortest_inplane_period(basis)
+    naive = min(float(np.linalg.norm(basis[0])), float(np.linalg.norm(basis[1])))
+
+    assert (m, n) not in ((1, 0), (0, 1))
+    assert period < naive / 4.0
+
+
+def test_gate_is_not_swallowed_when_orientation_is_short_circuited():
+    """Patching out ``_orient_slab`` must break the build, not degrade it.
+
+    Before the gate the same patch produced a silently smaller cell and 20
+    quiet candidates.  It has to raise now, and the failure has to survive
+    ``build_all``: a gate whose exception is counted and dropped is an off
+    switch under another name.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=(1, 1, 1), film_miller=(1, 1, 1), relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with (
+        patch("atominterface.builders.coherent._orient_slab", side_effect=lambda slab: slab),
+        pytest.raises(GeometryGateError, match="criterion B"),
+    ):
+        builder.build_all()
+
+    assert builder.last_build_report["assembly_failed"] == 1
+
+
+def test_interface_proximity_warns_with_fractional_coordinates_instead_of_raising():
+    """Criterion D: a join inside a bond is reported, never refused.
+
+    ``gap=0.5`` puts the two boards well inside the Cu/Ni bond length --
+    which is what a user handing the relaxer a compressed join asks for,
+    and why this one is advisory.  The message has to carry the fractional
+    coordinates, because the distance alone cannot say whether the pair
+    faces the join or sits inside one of the boards.
+
+    This pair is laterally displaced by half a surface vector, so the
+    on-top clause must stay quiet: the message has to distinguish a
+    merely tight join from a directly opposed one, or the warning that
+    matters most (symmetry-locked registry) drowns in the ones that
+    do not.
+    """
+    config = CoherentInterfaceConfig(gap=0.5, relax_terminations=False)
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates, "an advisory proximity warning must not drop the candidate"
+    proximity = [w for w in caught if "criterion D" in str(w.message)]
+    assert proximity, "a join inside a bond length went unreported"
+
+    message = str(proximity[0].message)
+    assert "u=" in message and "v=" in message and "w=" in message
+    assert "#" in message
+    assert "Cu" in message and "Ni" in message
+    # Half a surface vector sideways, so this is a tight join, not a
+    # symmetry-locked one -- the on-top clause would be a false alarm.
+    assert "lateral offset" in message
+    assert "on-top" not in message.lower()

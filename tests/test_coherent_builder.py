@@ -920,13 +920,71 @@ def test_build_auto_mode_warns_about_polar_termination_without_transforming():
     assert candidate.metadata["nominal_charge"] == 0.0
 
 
+def _unexpected_warnings(caught):
+    """Warnings these charge tests care about: the polarity bookkeeping only.
+
+    Two builder advisories are filtered out here, both legitimately
+    emitted by this very build and both owned by
+    ``tests/test_slab_geometry.py``, which asserts them positively:
+
+    * ``[geometry gate]`` -- on-top stacking at the default 2.0 A gap
+      always puts the join inside a bond;
+    * ``[orientation]`` -- these boards are rocksalt (111), and every
+      non-(001) orientation is warned about exactly once per build.
+
+    Neither is a fact about polarity, which is what these tests are for.
+    A filter is only safe while something else insists the warning still
+    fires, so both have their own positive test.
+    """
+    return [
+        w
+        for w in caught
+        if issubclass(w.category, UserWarning)
+        and not any(marker in str(w.message) for marker in ("[geometry gate]", "[orientation]"))
+    ]
+
+
+def test_geometry_gate_warning_filtered_above_is_asserted_here():
+    """The warning the helper above filters out, asserted positively.
+
+    Filtering a warning out of an assertion is only safe while something
+    else insists it still fires -- otherwise a future change to the
+    threshold makes it vanish silently and the filter keeps looking
+    green.  On-top NaCl(111) stacking puts the join at exactly the
+    requested 2.0 A gap, inside the 2.82 A NaCl bond, so criterion D has
+    to speak up.
+    """
+    builder = _polar_builder(symmetric_slabs=False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build()
+
+    assert candidates
+    proximity = [w for w in caught if "criterion D" in str(w.message)]
+    assert proximity, "on-top stacking at the default gap went unreported"
+
+    message = str(proximity[0].message)
+    # Same elements every gate message carries.  Pinned individually: a
+    # message element nothing asserts on is an element that can be
+    # dropped without a single test noticing.
+    assert "criterion D" in message
+    assert "contact scale" in message
+    assert "requested gap" in message
+    assert "u=" in message and "v=" in message and "w=" in message
+    # ...and the one that makes this pair interesting: it is directly
+    # opposed, i.e. a candidate symmetry-locked registry rather than a
+    # merely tight gap.
+    assert "lateral offset = 0.000000 A" in message
+    assert "on-top" in message.lower()
+
+
 def test_build_symmetric_true_transforms_and_marks_candidates():
     builder = _polar_builder(symmetric_slabs=True)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         candidates = builder.build()
 
-    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+    assert not _unexpected_warnings(caught)
     candidate = candidates[0]
     assert candidate.metadata["symmetric"] is True
     # A mirror-symmetric board has no net normal dipole.
@@ -942,7 +1000,7 @@ def test_build_symmetric_false_is_silent_and_untransformed():
         warnings.simplefilter("always")
         candidates = builder.build()
 
-    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+    assert not _unexpected_warnings(caught)
     assert candidates[0].metadata["symmetric"] is False
     assert candidates[0].metadata["polar"] is True
 

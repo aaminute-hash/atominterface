@@ -18,7 +18,7 @@ import warnings
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
@@ -32,6 +32,7 @@ from atominterface.builders.charge import (
     CHARGE_KNOWN,
     CHARGE_SOURCE,
     SLAB_ID,
+    _orient_slab,
     _site_dependent_charge,
     analyze_charge_polarity,
     charge_rejection_reasons,
@@ -68,12 +69,138 @@ except ImportError:  # pragma: no cover - optional dependency
 __all__ = [
     "CoherentInterfaceConfig",
     "CoherentInterfaceBuilder",
+    "GeometryGateError",
     "reference_slabs",
 ]
+
+
+class GeometryGateError(ValueError):
+    """An assembled interface violates a geometry invariant.
+
+    Raised by :func:`_assemble_interface` when a board's in-plane cell
+    would be misread downstream.  Every slice the builder chain takes
+    (``lattice[:2, :2]``, ``cart_coords[:, 2]``) reads the cell as if
+    ``a`` and ``b`` were level and ``c`` carried the vacuum -- which
+    :func:`_orient_slab` guarantees for generated boards and nothing
+    guarantees for anything else.  A board that skips that step still
+    looks fine to the slicer: it just gets a *smaller* cell, and every
+    number derived from it (area, layer spacing, gamma) is quietly wrong.
+
+    There is deliberately no way to switch this off.  A geometry that
+    cannot be measured correctly cannot be reported correctly either, so
+    the only honest answer is to refuse the structure.
+    """
+
+
+#: Relative slack on criterion B.  Cell areas are tens of A^2, so 1e-6 is
+#: ~1e-5 A^2 -- four orders below the last digit anyone reports, and six
+#: orders above the ~1e-3 relative loss a (111) projection produces.
+AREA_CONSERVATION_RTOL = 1e-6
+
+#: Half-width of the ``(m, n)`` search for the shortest in-plane vector.
+#: 4 covers every combination a coherent match up to ``max_area`` can
+#: produce while still costing 80 norm evaluations.
+INPLANE_PERIOD_RANGE = 4
+
+#: Relative slack on criterion C, so the gate trips on a real compression
+#: and not on the last ulp of a period measured equal to its bound.
+INPLANE_PERIOD_RTOL = 1e-9
+
+#: A cross-interface pair is called on-top when its lateral offset is
+#: below this (A).  Deliberately a tight absolute bound and not a
+#: fraction of the bond scale: the claim the message makes is that the
+#: in-plane gradient *vanishes by symmetry*, and that is true only at the
+#: symmetric point itself.  A pair 0.1 A off it has a small gradient, not
+#: a vanishing one -- a slow climb out of a shallow basin, which is a
+#: step-budget concern and not a geometry violation.  Saying "symmetric"
+#: about both would make the warning assert something false, which in a
+#: package that sells "no trustworthy-looking output from an untrustworthy
+#: calculation" is worse than missing the second case.  Coherent lateral
+#: offsets are rational fractions of a lattice vector anyway, so they are
+#: either exactly zero or of order a fraction of an angstrom.
+ON_TOP_LATERAL_TOL = 1e-6
+
+#: The one orientation whose gamma_int can be quoted without scanning the
+#: lateral registry first -- and only because the published protocol
+#: enumerated ten candidates itself.  Every other orientation is exposed
+#: by ``--sub-miller``/``--film-miller`` as a single as-built registry.
+PUBLISHED_MILLER: tuple[int, int, int] = (0, 0, 1)
 
 # Strains within 1e-4 (0.01 %) of each other are treated as equally good
 # when ranking lattice matches; see ``_match_lattices``.
 _STRAIN_TIE_DIGITS = 4
+
+
+def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
+    """Say out loud that a non-(001) run ships one unscanned registry.
+
+    Three things the caller cannot see from the output otherwise.
+
+    The registry is whatever the builder produced, and the builder makes
+    it a function of ``--min-thickness``: on Cu/Ni(111), 10.8 / 14.4 /
+    18.0 / 21.6 A start at fcc-hollow / on-top / fcc-hollow / hcp-hollow
+    and give gamma_int 0.081 / 0.898 / 0.081 / 0.081 J/m^2. Nothing
+    slides during relaxation -- every final registry was bit-identical to
+    its initial one -- so a jump across a thickness scan is the registry
+    changing, not the thickness failing to converge. That is a pure
+    artefact, and it reads exactly like the convergence failure it is
+    not.
+
+    The geometry gate cannot catch any of this and must not be stretched
+    to: a non-(001) board can be level, conserve its area and keep a
+    healthy in-plane period while sitting on a high-symmetry registry,
+    where the in-plane gradient vanishes by symmetry and the relaxation
+    stops where it started -- converged, fmax met, OOD green, valid=True,
+    and wrong. The (110) default ridge site reads 0.5953 J/m^2 against a
+    scanned 0.088, 6.8x high, with a shortest contact of 2.27 A that no
+    proximity check would flag.
+
+    Relaxing longer does not help and is worth saying so: 900 steps left
+    the (110) ridge site bit-identical. The fix is to scan the registry
+    and quote that minimum, not to relax harder.
+
+    ``lateral`` is the as-built registry in A, measured once per
+    assembly. It is quoted so two runs can be checked for being the same
+    run before their gamma_int is compared at all.
+    """
+    off_001 = [
+        f"{side} {tuple(int(index) for index in miller)}"
+        for side, miller in (("substrate", config.substrate_miller), ("film", config.film_miller))
+        if tuple(int(index) for index in miller) != PUBLISHED_MILLER
+    ]
+    if not off_001:
+        return
+
+    registry = (
+        f"as-built lateral offset: {lateral:.6f} A (in-plane part of the closest "
+        "substrate/film pair; two runs are comparable only if this matches). "
+        if lateral is not None
+        else ""
+    )
+    warnings.warn(
+        f"[orientation] {' and '.join(off_001)}: this orientation is not (001), so the "
+        "lateral registry the builder hands over has not been scanned -- and it is a "
+        "function of --min-thickness rather than of anything physical. Measured on "
+        "Cu/Ni(111): 10.8 / 14.4 / 18.0 / 21.6 A start at fcc-hollow / on-top / "
+        "fcc-hollow / hcp-hollow and give gamma_int 0.081 / 0.898 / 0.081 / 0.081 "
+        "J/m^2, an 11x step from the thickness knob alone. No thickness slid away from "
+        "its starting registry during relaxation -- every final registry was "
+        "bit-identical to its initial one -- so a jump across a thickness scan is the "
+        "registry changing, not the thickness failing to converge; compare registries "
+        f"before reading anything into a thickness scan. {registry}"
+        "The site itself is not a geometry violation: it is level, conserves its area "
+        "and keeps a healthy in-plane period, but on a high-symmetry registry the "
+        "in-plane gradient vanishes by symmetry, so a relaxation stops where it "
+        "started -- converged, fmax met, OOD green, valid=True, and wrong. (110) shows "
+        "the same thing from its default ridge site: 0.5953 J/m^2 against a scanned "
+        "0.088, 6.8x high. A longer relaxation does not fix it: 900 steps left that "
+        "site bit-identical, and only a thickness step that accumulated in-plane shear "
+        "moved it. Run an explicit registry scan and quote its minimum before citing "
+        "gamma_int for a non-(001) orientation. (001) is the exception: the published "
+        "protocol enumerated ten candidates itself, which is why its value can be "
+        "quoted directly.",
+        stacklevel=2,
+    )
 
 
 @dataclass(frozen=True)
@@ -421,9 +548,10 @@ def _get_terminations(structure, miller, min_thickness, vacuum_thickness):
         raise ValueError(f"slab generation failed for Miller indices {miller}: {exc}") from exc
 
     out = []
-    for idx, slab in enumerate(slabs):
-        if slab is None:
+    for idx, generated in enumerate(slabs):
+        if generated is None:
             continue
+        slab = _orient_slab(generated)
         slab.properties["ai_slab_generated"] = True
         slab.properties["charge_overridden_sources"] = structure.properties.get(
             "charge_overridden_sources", []
@@ -609,8 +737,12 @@ def _match_lattices(
         max_angle_tol=math.radians(config.zsl_max_angle),
     )
 
-    sub_cell_area = abs(float(np.linalg.det(sub_vecs[:, :2])))
-    film_cell_area = abs(float(np.linalg.det(film_vecs[:, :2])))
+    # True parallelogram area |a x b|.  Using the norm of the cross product
+    # rather than the 2x2 determinant keeps the result independent of how
+    # the cell is rotated: the determinant implicitly projects a, b onto xy
+    # and under-reports any cell whose in-plane vectors are not level.
+    sub_cell_area = float(np.linalg.norm(np.cross(sub_vecs[0], sub_vecs[1])))
+    film_cell_area = float(np.linalg.norm(np.cross(film_vecs[0], film_vecs[1])))
 
     matches: list[_MatchInfo] = []
     try:
@@ -716,8 +848,9 @@ def _fallback_matches(
     sub_vecs = np.array(sub_lat.matrix[:2], dtype=np.float64)
     film_vecs = np.array(film_lat.matrix[:2], dtype=np.float64)
 
-    film_area = float(abs(np.linalg.det(film_vecs[:, :2])))
-    sub_cell_area = float(abs(np.linalg.det(sub_vecs[:, :2])))
+    # True area |a x b|, not the 2x2 determinant -- see ``_match_lattices``.
+    film_area = float(np.linalg.norm(np.cross(film_vecs[0], film_vecs[1])))
+    sub_cell_area = float(np.linalg.norm(np.cross(sub_vecs[0], sub_vecs[1])))
     if film_area <= 0:
         return []
 
@@ -809,6 +942,9 @@ def _strain_film_onto(film_slab, substrate_slab_2d):
     from pymatgen.core.lattice import Lattice as _Lattice
 
     film_mat = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
+    # ``[:2, :2]`` is the true in-plane block because the z components of a
+    # and b are zero -- guaranteed by ``_orient_slab`` for every slab that
+    # comes out of :func:`_get_terminations`.
     film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
     sub_2d = np.asarray(substrate_slab_2d, dtype=np.float64)
 
@@ -835,6 +971,301 @@ def _strain_film_onto(film_slab, substrate_slab_2d):
     )
     strained.properties.update(film_slab.properties)
     return strained
+
+
+def _shortest_inplane_period(in_plane: np.ndarray) -> tuple[float, int, int]:
+    """Shortest ``|m*a + n*b|`` over ``m, n`` in ``[-4, 4]``, as ``(length, m, n)``.
+
+    Brute force rather than ``min(|a|, |b|)``: a basis can be reduced in
+    area and still carry a *combination* far shorter than either vector --
+    ``a = (2.556, 0)``, ``b = (3 * 2.556 + 0.05, 0.3)`` reads
+    ``min(|a|, |b|) = 2.556`` but repeats every ``|b - 3 a| = 0.304 A``.
+    Reading ``|a|`` alone would call that cell healthy.
+    """
+    best = (float("inf"), 0, 0)
+    for m in range(-INPLANE_PERIOD_RANGE, INPLANE_PERIOD_RANGE + 1):
+        for n in range(-INPLANE_PERIOD_RANGE, INPLANE_PERIOD_RANGE + 1):
+            if m == 0 and n == 0:
+                continue
+            length = float(np.linalg.norm(m * in_plane[0] + n * in_plane[1]))
+            if length < best[0]:
+                best = (length, m, n)
+    return best
+
+
+def _pair_label(slab, i: int, j: int) -> str:
+    """``#3 Cu (u=..., v=..., w=...) / #7 Ni (...)`` for two sites.
+
+    The fractional coordinates are the point.  A pair that is too close
+    is ambiguous on distance alone: two atoms facing each other across
+    the join (same ``u, v``, ``w`` straddling the interface) are the
+    intended small gap, while two atoms inside one plane are a cell that
+    was compressed.  Only ``w`` separates those, so it is always shown.
+    """
+    # Wrapped into the cell: the builders keep ``to_unit_cell=False``, so
+    # raw fractional coordinates arrive as -6.33 rather than 0.67 and say
+    # nothing about where in the stack the pair actually sits.
+    coords = np.mod(np.asarray(slab.frac_coords, dtype=np.float64), 1.0)
+    species = [str(entry) for entry in slab.species]
+
+    def _site(index: int) -> str:
+        u, v, w = coords[index]
+        return f"#{index} {species[index]} (u={u:.6f}, v={v:.6f}, w={w:.6f})"
+
+    return f"{_site(i)} / {_site(j)}"
+
+
+def _check_area_conservation(side: str, before: np.ndarray, after, transform) -> None:
+    """Criterion B: the in-plane block the stack uses spans the board's area.
+
+    Replication by an integer supercell multiplies the area by exactly
+    ``|det(transform)|``, and a level board's ``[:2, :2]`` block *is* its
+    interface plane -- so the area the assembly writes into the interface
+    cell has to equal the unscaled board's area times the multiplicity.
+    Any gap between the two says ``a`` or ``b`` carries a z component and
+    ``[:2, :2]`` is a projection onto xy rather than the plane itself.
+
+    ``before`` is the pre-scaling lattice matrix and ``transform`` the
+    supercell description (``None`` when nothing was scaled).
+    """
+    multiplicity = 1 if transform is None else _multiplicity(transform)
+    expected = _lattice_area(np.asarray(before, dtype=np.float64)) * multiplicity
+    if not math.isfinite(expected) or expected <= 0.0:
+        return
+
+    matrix = np.asarray(after.lattice.matrix, dtype=np.float64)
+    # The two areas are only the same number for a level cell; reported
+    # separately so the message says which step lost the area.
+    true_area = _lattice_area(matrix)
+    used_area = float(abs(np.linalg.det(matrix[:2, :2])))
+    deviation = max(abs(true_area - expected), abs(used_area - expected)) / expected
+    if deviation <= AREA_CONSERVATION_RTOL:
+        return
+
+    raise GeometryGateError(
+        f"[geometry gate] criterion B (area conservation) failed on the {side} side. "
+        f"measured in-plane block = {used_area:.6f} A^2, board's true cell area = "
+        f"{true_area:.6f} A^2, reference = {multiplicity} x {expected / multiplicity:.6f} A^2 "
+        f"= {expected:.6f} A^2; relative deviation {deviation:.3e} exceeds "
+        f"{AREA_CONSERVATION_RTOL:.1e}. "
+        f"a = ({matrix[0][0]:.6f}, {matrix[0][1]:.6f}, {matrix[0][2]:.6f}), "
+        f"b = ({matrix[1][0]:.6f}, {matrix[1][1]:.6f}, {matrix[1][2]:.6f}): "
+        "a or b carries a z component, so lattice[:2, :2] is the xy projection of the "
+        "interface plane instead of the plane itself, and every area, spacing and gamma "
+        "derived from this stack is scaled by that projection. Level the board first."
+    )
+
+
+def _check_inplane_period(side: str, slab, max_strain: float) -> float:
+    """Criterion C: the in-plane cell must still repeat at a physical period.
+
+    The board's tightest pair sets the scale: nothing in a relaxed board
+    sits closer than a nearest-neighbour shell, and the coherent match is
+    allowed to compress that by at most ``max_strain``.  A period below
+    ``d_ref * (1 - max_strain)`` means the cell the stack will repeat was
+    squeezed past what the chemistry allows -- which is what a projected
+    in-plane block does, since a projection can only shorten vectors.
+
+    Returns the ``d_ref`` it measured so the caller can reuse the scale
+    (the proximity warning needs it); NaN when the board is too small to
+    establish one.
+    """
+    from atominterface.relax.proximity import pairwise_min_distance
+
+    if len(slab) < 2:
+        return float("nan")
+    d_ref, i, j = pairwise_min_distance(_to_ase(slab))
+    if not math.isfinite(d_ref):
+        return float("nan")
+
+    matrix = np.asarray(slab.lattice.matrix, dtype=np.float64)
+    period, m, n = _shortest_inplane_period(matrix[:2, :2])
+    threshold = d_ref * (1.0 - float(max_strain))
+    if period >= threshold * (1.0 - INPLANE_PERIOD_RTOL):
+        return d_ref
+
+    raise GeometryGateError(
+        f"[geometry gate] criterion C (in-plane period) failed on the {side} side. "
+        f"measured shortest in-plane period = {period:.6f} A "
+        f"({m}*a + {n}*b, over m, n in [{-INPLANE_PERIOD_RANGE}, {INPLANE_PERIOD_RANGE}]), "
+        f"threshold = {threshold:.6f} A = d_ref {d_ref:.6f} A x (1 - {float(max_strain):.6f}). "
+        f"d_ref is the tightest pair in the board: {_pair_label(slab, i, j)}. "
+        "A short period can be a compressed cell or an intended small gap -- read the "
+        "fractional coordinates: a pair with the same u, v whose w straddles the join is "
+        "the gap you asked for, a pair inside one plane is a cell that was squeezed."
+    )
+
+
+class _RegistryPair(NamedTuple):
+    """The closest substrate/film pair across the join, and how it is offset.
+
+    ``lateral`` -- the in-plane part of their minimum-image separation --
+    is the registry.  It is what a registry scan varies and what two runs
+    have to match before their gamma_int can be compared, so it is
+    measured once per assembly and reused by both consumers rather than
+    derived twice by two different routes that could disagree.
+    """
+
+    distance: float
+    lateral: float
+    substrate_index: int
+    film_index: int
+    du: float
+    dv: float
+
+
+def _closest_cross_pair(interface, n_substrate: int) -> _RegistryPair | None:
+    """Closest substrate/film pair in ``interface``, with its lateral offset.
+
+    ``None`` when one side is empty, so there is no join to measure.
+    """
+    from atominterface.relax.proximity import nearest_image_vectors, pairwise_distance_matrix
+
+    if n_substrate <= 0 or n_substrate >= len(interface):
+        return None
+    atoms = _to_ase(interface)
+    matrix = pairwise_distance_matrix(atoms)
+    cross = matrix[:n_substrate, n_substrate:]
+    flat = int(np.argmin(cross))
+    i, j = divmod(flat, cross.shape[1])
+    distance = float(cross[i, j])
+
+    # Lateral part of the minimum-image separation: the pair's offset
+    # within the interface plane, with the normal component removed.
+    vectors, _ = nearest_image_vectors(atoms, atoms.positions[i])
+    cell = np.asarray(interface.lattice.matrix, dtype=np.float64)
+    normal = np.cross(cell[0], cell[1])
+    normal = normal / np.linalg.norm(normal)
+    separation = vectors[n_substrate + j]
+    lateral_vector = separation - float(separation @ normal) * normal
+    lateral = float(np.linalg.norm(lateral_vector))
+    # Rounded to the precision the message prints, then ``+ 0.0`` to turn
+    # the -0.0 a tiny negative component leaves behind into +0.0: an
+    # exactly opposed pair has to read "du=0.000000", because "du=-0.000000"
+    # invites the reader to go looking for an offset that is not there.
+    fit = np.linalg.lstsq(cell[:2].T, lateral_vector, rcond=None)[0]
+    du = float(np.round(fit[0], 6)) + 0.0
+    dv = float(np.round(fit[1], 6)) + 0.0
+    return _RegistryPair(distance, lateral, i, n_substrate + j, du, dv)
+
+
+def _warn_interface_proximity(
+    interface, pair: _RegistryPair | None, d_refs, max_strain: float, gap: float
+) -> None:
+    """Criterion D, advisory only: is the closest cross-interface pair a bond?
+
+    Deliberately a warning and not a gate.  ``config.gap`` (2.0 A by
+    default) is *shorter* than a Cu/Ni bond on purpose -- it hands the
+    relaxer a slightly compressed join to resolve -- so "closer than a
+    bond" is the normal state of a fresh interface and raising here would
+    reject every legitimate one.  It is still worth saying out loud,
+    because the same signature means two different things: the join the
+    caller asked for, or two boards pushed into each other.  The distance
+    cannot separate those; the fractional coordinates can, so they are
+    what the message leads with.
+
+    Nor is a small distance the worst thing this can be.  A pair that is
+    both close *and* laterally undisplaced is on top of its counterpart,
+    and an exactly opposed stack sits on a mirror-symmetric stationary
+    point where the in-plane gradient vanishes by symmetry -- the
+    relaxation converges there, every numerical check stays green, and
+    gamma_int comes out 5.9x high on Cu/Ni(111) and 6.3x high on (110).
+    That is why the lateral offset is measured and named rather than
+    left for the reader to work out.
+
+    The offset is compared against an absolute tolerance, not against a
+    fraction of the bond scale: the gradient vanishes only at the
+    symmetric point, and a pair a fraction of an angstrom off it is a
+    shallow basin rather than a stationary point.  Calling both
+    "symmetric" would make the message assert something false.
+    """
+    measured = [d for d in d_refs if math.isfinite(d)]
+    if not measured or pair is None:
+        return
+    threshold = min(measured) * (1.0 - float(max_strain))
+    if pair.distance >= threshold:
+        return
+    on_top = pair.lateral <= ON_TOP_LATERAL_TOL
+
+    warnings.warn(
+        f"[geometry gate] criterion D (interface proximity) on the assembled interface: "
+        f"closest substrate/film pair is {pair.distance:.6f} A, below the {threshold:.6f} A "
+        f"contact scale (d_ref {min(measured):.6f} A x (1 - {float(max_strain):.6f})); "
+        f"the requested gap was {float(gap):.6f} A. "
+        f"pair: {_pair_label(interface, pair.substrate_index, pair.film_index)}. "
+        f"lateral offset = {pair.lateral:.6f} A (du={pair.du:.6f}, dv={pair.dv:.6f}). "
+        "Advisory, and ambiguous on distance alone: a pair sharing u, v whose w straddles "
+        "the join is the gap you asked for and will relax apart; a pair inside one board "
+        "means the two sides were pushed into each other. Read w before acting."
+        + (
+            " This pair is exactly opposed -- zero lateral offset, i.e. on-top registry. "
+            "Such a stack sits on a mirror-symmetric stationary point whose in-plane "
+            "gradient vanishes by symmetry, so a relaxation can converge there and stay: "
+            "it relaxes, passes OOD and looks numerically healthy while gamma_int reads "
+            "5.9x high on Cu/Ni(111) (at 14.4 A: 7 Cu against 8 Ni layers leaves the join "
+            "on-top and the optimizer stops after a single step) and 6.3x high on (110). "
+            "Break the symmetry with any one of: shifting the initial registry; changing "
+            "the thickness step so both sides get the same layer count (the 7/8 asymmetry "
+            "above is what made the on-top site a stationary point); or running an "
+            "explicit registry scan."
+            if on_top
+            else ""
+        ),
+        stacklevel=2,
+    )
+
+
+def _prepare_stack(substrate_slab, film_slab, match, max_strain):
+    """Replicate both boards, gate them, and strain the film onto the substrate.
+
+    Steps 1 and 2 of :func:`_assemble_interface`, plus the geometry gates
+    that have to bracket them: criterion B belongs right after the
+    replication (which must conserve area) and criterion C right after
+    the strain (which must not).  Returns ``(substrate_slab, film_slab,
+    sub_2d, sub_height, d_refs)`` -- the boards to stack, the substrate's
+    in-plane block and vacuum column, and the contact scale each side
+    measured.
+    """
+    # Criterion B runs on the *replicated* board, before the coherent
+    # strain: replication must conserve area and straining must not, so
+    # folding the two into one comparison would fire on every match.
+    sub_before = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64)
+    film_before = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
+    if match is not None:
+        substrate_slab = _scale_in_plane(substrate_slab, match.substrate_supercell)
+        film_slab = _scale_in_plane(film_slab, match.film_supercell)
+    _check_area_conservation(
+        "substrate", sub_before, substrate_slab, match.substrate_supercell if match else None
+    )
+    _check_area_conservation(
+        "film", film_before, film_slab, match.film_supercell if match else None
+    )
+
+    sub_mat = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64)
+    # In-plane block: exact, since ``_orient_slab`` guarantees a and b carry
+    # no z component and the vacuum column no in-plane one.
+    sub_2d = np.asarray(sub_mat[:2, :2], dtype=np.float64)
+    film_2d = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
+
+    # Strain the film onto the substrate cell.  The shared helper keeps
+    # the fractional coordinates -- i.e. the stacking sequence -- intact
+    # and is the very same call ``reference_slabs`` performs, so a
+    # reference board and the interface side it references are strained
+    # by literally the same code.
+    coherent = (
+        match is not None
+        and abs(float(np.linalg.det(sub_2d))) > 1e-9
+        and abs(float(np.linalg.det(film_2d))) > 1e-9
+    )
+    if coherent:
+        film_slab = _strain_film_onto(film_slab, sub_2d)
+    # Criterion C runs on the cells the stack will actually repeat, so
+    # after the film has been strained onto the substrate.
+    d_refs = (
+        _check_inplane_period("substrate", substrate_slab, max_strain),
+        _check_inplane_period("film", film_slab, max_strain),
+    )
+    return substrate_slab, film_slab, sub_2d, float(sub_mat[2, 2]), d_refs
 
 
 def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
@@ -870,39 +1301,27 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
 
     gap = 2.0
     vacuum = 10.0
+    max_strain = 0.05
     if config is not None:
         gap = float(getattr(config, "gap", gap))
         vacuum = float(getattr(config, "vacuum_thickness", vacuum))
+        max_strain = float(getattr(config, "max_strain", max_strain))
 
     if ANALYSIS_CHARGE not in substrate_slab.site_properties:
         substrate_slab = _prepare_charge_structure(substrate_slab)
     if ANALYSIS_CHARGE not in film_slab.site_properties:
         film_slab = _prepare_charge_structure(film_slab)
-    if match is not None:
-        substrate_slab = _scale_in_plane(substrate_slab, match.substrate_supercell)
-        film_slab = _scale_in_plane(film_slab, match.film_supercell)
 
-    sub_mat = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64)
-    film_mat = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
-    sub_2d = np.asarray(sub_mat[:2, :2], dtype=np.float64)
-    film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
-
+    substrate_slab, film_slab, sub_2d, sub_height, d_refs = _prepare_stack(
+        substrate_slab, film_slab, match, max_strain
+    )
     sub_coords = np.asarray(substrate_slab.cart_coords, dtype=np.float64).copy()
 
-    # Strain the film onto the substrate cell.  The shared helper keeps
-    # the fractional coordinates -- i.e. the stacking sequence -- intact
-    # and is the very same call ``reference_slabs`` performs, so a
-    # reference board and the interface side it references are strained
-    # by literally the same code.
-    coherent = (
-        match is not None
-        and abs(float(np.linalg.det(sub_2d))) > 1e-9
-        and abs(float(np.linalg.det(film_2d))) > 1e-9
-    )
-    if coherent:
-        film_slab = _strain_film_onto(film_slab, sub_2d)
     # In-plane cell the film ends up with: the substrate cell once it has
     # been strained onto it, its own cell in the legacy no-match stacking.
+    # The z column of the cell carries nothing else either, so reading the
+    # normal direction off ``cart_coords[:, 2]`` below is legitimate: both
+    # slabs were leveled by ``_orient_slab``.
     film_in_plane = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
     film_coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
 
@@ -914,9 +1333,10 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         rows[2, 2] = float(c)
         return rows
 
-    sub_cell = _cell(sub_2d, sub_mat[2, 2] if sub_mat[2, 2] > 0 else 1.0)
+    sub_cell = _cell(sub_2d, sub_height if sub_height > 0 else 1.0)
 
-    # Shift film so its bottom sits at substrate_top + gap.
+    # Shift film so its bottom sits at substrate_top + gap.  z is the
+    # surface normal for both boards, so these extents are real heights.
     sub_top = float(np.max(sub_coords[:, 2])) if len(sub_coords) else 0.0
     film_bottom = float(np.min(film_coords[:, 2])) if len(film_coords) else 0.0
     z_shift = sub_top + gap - film_bottom
@@ -943,6 +1363,18 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         site_properties=site_properties,
     )
     _attach_charge_geometry(interface, substrate_slab, film_slab, vacuum)
+    # The registry is measured here, once, and handed to both consumers:
+    # criterion D quotes it, and the orientation advisory names it so two
+    # runs can be compared. Two independent routes to the same number
+    # would be two chances to disagree about what the run shipped.
+    registry = _closest_cross_pair(interface, len(substrate_slab))
+    if registry is not None:
+        interface.properties["registry_lateral_offset"] = registry.lateral
+    # Advisory, and deliberately bounded by ``gap`` as well as by the bond
+    # scale: ``gap`` is a separation the caller asked for, so a pair at the
+    # join sitting at ``gap`` is a request being honoured, not a collision.
+    # Only a pair closer than the smaller of the two is worth reporting.
+    _warn_interface_proximity(interface, registry, d_refs, max_strain, gap)
     # Which in-plane cell each side actually occupies in the stack.  The
     # substrate is the reference and is never deformed; the film either
     # inherits that cell or, when nothing was strained, keeps its own --
@@ -1105,6 +1537,12 @@ def _to_candidate(
         "geometry": "coherent-supercell",
         "gap_ang": config.gap,
         "vacuum_ang": config.vacuum_thickness,
+        # Measured once during assembly (see ``_closest_cross_pair``) and
+        # carried through so a downstream reader can tell two candidates
+        # apart by the site they start on, not only by their energy.
+        "registry_lateral_offset_ang": (getattr(interface, "properties", None) or {}).get(
+            "registry_lateral_offset"
+        ),
         **match.metadata,
         "rotation_matrix": None if match.rotation is None else match.rotation.tolist(),
     }
@@ -1237,6 +1675,8 @@ def reference_slabs(
     if match is not None:
         sub_slab = _scale_in_plane(sub_slab, match.substrate_supercell)
         film_slab = _scale_in_plane(film_slab, match.film_supercell)
+        # Same exact in-plane block as ``_assemble_interface`` reads: a and
+        # b are level and the vacuum column carries no in-plane part.
         sub_2d = np.asarray(sub_slab.lattice.matrix, dtype=np.float64)[:2, :2]
         film_2d = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
         if abs(float(np.linalg.det(sub_2d))) > 1e-9 and abs(float(np.linalg.det(film_2d))) > 1e-9:
@@ -1412,6 +1852,28 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
             self.last_build_report["empty_stage"] = "no_matches"
             return []
 
+        candidates = self._collect_candidates(matches, slabs)
+
+        if not candidates:
+            self.last_build_report["empty_stage"] = (
+                "charge_filter" if self.last_build_report["rejected"] else "assembly"
+            )
+        # Once per build, and only after assembly: the message quotes the
+        # registry that was actually built, which does not exist yet when
+        # the config is read.  ``None`` keeps the advisory useful even when
+        # nothing assembled -- the orientation is still unscanned.
+        _warn_unscanned_orientation(self.config, self._built_lateral_offset(candidates))
+        return candidates
+
+    def _collect_candidates(self, matches: list[_MatchInfo], slabs) -> list[Candidate]:
+        """Assemble every accepted candidate up to the configured limit.
+
+        Separate from ``build_all`` so that hitting ``max_candidates``
+        cannot return before the per-build advisories are emitted: the
+        orientation warning carries a number measured during assembly, and
+        an early ``return`` here would silently drop it on exactly the
+        runs that build the most candidates.
+        """
         candidates: list[Candidate] = []
         for match in matches:
             for sub_idx, sub_slab in slabs[0]:
@@ -1422,12 +1884,22 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
                     if len(candidates) >= self.config.max_candidates:
                         self.last_build_report["stopped_at_limit"] = True
                         return candidates
-
-        if not candidates:
-            self.last_build_report["empty_stage"] = (
-                "charge_filter" if self.last_build_report["rejected"] else "assembly"
-            )
         return candidates
+
+    @staticmethod
+    def _built_lateral_offset(candidates: Sequence[Candidate]) -> float | None:
+        """The as-built registry of the first assembled candidate, in A.
+
+        Handing the warning a number instead of a description is the whole
+        point: two non-(001) runs are only comparable if they started on
+        the same site, and that is a distance the caller cannot see from
+        anything else in the output.
+        """
+        for candidate in candidates:
+            lateral = candidate.metadata.get("registry_lateral_offset_ang")
+            if isinstance(lateral, (int, float)):
+                return float(lateral)
+        return None
 
     def _build_candidate(self, match, sub_idx, sub_slab, film_idx, film_slab):
         report = self.last_build_report
@@ -1437,6 +1909,14 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
             _prepare_charge_structure(slab)
         try:
             interface = _assemble_interface(sub_slab, film_slab, match, self.config)
+        except GeometryGateError:
+            # A gate that is swallowed is not a gate.  Any other assembly
+            # problem is specific to one candidate and is worth dropping
+            # quietly; a geometry violation is a property of the *boards*,
+            # so every remaining candidate would fail the same way and the
+            # honest answer is to say so rather than to return nothing.
+            report["assembly_failed"] += 1
+            raise
         except Exception:  # noqa: BLE001
             report["assembly_failed"] += 1
             return None
