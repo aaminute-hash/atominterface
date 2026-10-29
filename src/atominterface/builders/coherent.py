@@ -120,9 +120,60 @@ INPLANE_PERIOD_RTOL = 1e-9
 #: either exactly zero or of order a fraction of an angstrom.
 ON_TOP_LATERAL_TOL = 1e-6
 
+#: The one orientation whose gamma_int can be quoted without scanning the
+#: lateral registry first -- and only because the published protocol
+#: enumerated ten candidates itself.  Every other orientation is exposed
+#: by ``--sub-miller``/``--film-miller`` as a single as-built registry.
+PUBLISHED_MILLER: tuple[int, int, int] = (0, 0, 1)
+
 # Strains within 1e-4 (0.01 %) of each other are treated as equally good
 # when ranking lattice matches; see ``_match_lattices``.
 _STRAIN_TIE_DIGITS = 4
+
+
+def _warn_unscanned_orientation(config) -> None:
+    """Say out loud that a non-(001) orientation ships one unscanned registry.
+
+    The geometry gate cannot catch this and must not be stretched to.
+    A non-(001) board can be perfectly level, conserve its area and keep
+    a healthy in-plane period while sitting on a high-symmetry lateral
+    registry, because a high-symmetry site is not a geometry violation:
+    its in-plane gradient vanishes by symmetry, so the relaxation stops
+    where it started -- converged, fmax met, OOD green, valid=True, and
+    wrong. Measured on Cu/Ni, the (110) default ridge site gives
+    gamma_int = 0.5953 J/m^2 against a scanned 0.088, 6.8x high, with a
+    shortest contact of 2.27 A that no proximity check would flag.
+
+    Relaxing longer does not help and is worth saying so: 900 steps left
+    the (110) ridge site bit-identical, and only a thickness step that
+    happened to accumulate in-plane shear moved it off. The fix is to
+    scan the registry and quote that minimum, not to relax harder.
+    """
+    off_001 = [
+        f"{side} {tuple(int(index) for index in miller)}"
+        for side, miller in (("substrate", config.substrate_miller), ("film", config.film_miller))
+        if tuple(int(index) for index in miller) != PUBLISHED_MILLER
+    ]
+    if not off_001:
+        return
+
+    warnings.warn(
+        f"[orientation] {' and '.join(off_001)}: this orientation is not (001), so the "
+        "lateral registry the builder hands over has not been scanned and may sit on a "
+        "high-symmetry site. Such a site is not a geometry violation -- it is level, "
+        "conserves its area and keeps a healthy in-plane period -- but its in-plane "
+        "gradient vanishes by symmetry, so a relaxation stops where it started: "
+        "converged, fmax met, OOD green, valid=True, and wrong. Measured on Cu/Ni the "
+        "(110) default ridge site gives gamma_int = 0.5953 J/m^2 against a scanned "
+        "0.088 (6.8x high), and (111) at 14.4 A locks on-top at 5.9x (7 Cu against 8 "
+        "Ni layers). A longer relaxation does not fix it: 900 steps left the (110) "
+        "ridge site bit-identical, and only a thickness step that accumulated in-plane "
+        "shear moved it. Run an explicit registry scan and quote its minimum before "
+        "citing gamma_int for a non-(001) orientation. (001) is the exception: the "
+        "published protocol enumerated ten candidates itself, which is why its value "
+        "can be quoted directly.",
+        stacklevel=2,
+    )
 
 
 @dataclass(frozen=True)
@@ -1726,6 +1777,11 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         errors = self.validate()
         if errors:
             raise ValueError("; ".join(errors))
+
+        # Once per build, not per candidate: the warning is about the
+        # orientation the run was configured with, and every candidate of
+        # that run shares it.
+        _warn_unscanned_orientation(self.config)
 
         slabs = self._prepared_slabs()
         matches = self._match(slabs=slabs)

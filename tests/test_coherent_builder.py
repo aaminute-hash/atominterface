@@ -921,17 +921,26 @@ def test_build_auto_mode_warns_about_polar_termination_without_transforming():
 
 
 def _unexpected_warnings(caught):
-    """Warnings these charge tests care about: anything but the geometry gate.
+    """Warnings these charge tests care about: the polarity bookkeeping only.
 
-    The gate emits an advisory note whenever the join sits inside a bond,
-    which on-top stacking at the default 2.0 A gap always does.  That is a
-    separate concern from the polarity bookkeeping under test here, and
-    ``tests/test_slab_geometry.py`` owns it.
+    Two builder advisories are filtered out here, both legitimately
+    emitted by this very build and both owned by
+    ``tests/test_slab_geometry.py``, which asserts them positively:
+
+    * ``[geometry gate]`` -- on-top stacking at the default 2.0 A gap
+      always puts the join inside a bond;
+    * ``[orientation]`` -- these boards are rocksalt (111), and every
+      non-(001) orientation is warned about exactly once per build.
+
+    Neither is a fact about polarity, which is what these tests are for.
+    A filter is only safe while something else insists the warning still
+    fires, so both have their own positive test.
     """
     return [
         w
         for w in caught
-        if issubclass(w.category, UserWarning) and "geometry gate" not in str(w.message)
+        if issubclass(w.category, UserWarning)
+        and not any(marker in str(w.message) for marker in ("[geometry gate]", "[orientation]"))
     ]
 
 

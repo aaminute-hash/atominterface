@@ -589,6 +589,66 @@ def _rotate_out_of_level(slab):
     return Structure(Lattice(matrix), [str(entry) for entry in slab.species], slab.frac_coords)
 
 
+@pytest.mark.parametrize("miller", [(1, 1, 1), (1, 1, 0)], ids=["111", "110"])
+def test_non_001_orientation_warns_that_the_registry_was_never_scanned(miller):
+    """A non-(001) run ships one as-built lateral registry, unscanned.
+
+    The geometry gate cannot catch the failure this warns about and must
+    not be stretched to: a board can be level, conserve its area and keep
+    a healthy in-plane period while sitting on a high-symmetry registry.
+    That site has no geometry defect -- its in-plane gradient vanishes by
+    symmetry, so the relaxation simply stops where it started, converged
+    and green and wrong.  Measured on Cu/Ni(110): the default ridge site
+    reads gamma_int = 0.5953 J/m^2 against a scanned 0.088.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=miller, film_miller=miller, relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates
+    # Once per build: the warning is about the orientation the run was
+    # configured with, which every candidate shares.
+    advisory = [w for w in caught if "[orientation]" in str(w.message)]
+    assert len(advisory) == 1
+
+    message = str(advisory[0].message).lower()
+    # The four things the reader has to be told.
+    assert "not (001)" in message
+    assert "gradient vanishes by symmetry" in message
+    assert "0.5953" in message and "6.8x" in message  # the measured consequence
+    assert "registry scan" in message  # the remedy
+    # ...and the one piece of advice that must NOT be given: relaxing
+    # longer was measured not to help, so the message has to say so.
+    assert "900 steps" in message
+
+
+def test_001_orientation_is_not_warned_about():
+    """(001) is silent: the published protocol scanned ten candidates itself.
+
+    This is the exception the non-(001) warning points at, so it needs
+    its own assertion -- otherwise "warn unless (001)" can degrade into
+    "always warn" without anything noticing.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=(0, 0, 1), film_miller=(0, 0, 1), relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates
+    assert [w for w in caught if "[orientation]" in str(w.message)] == []
+
+
 @pytest.mark.parametrize("miller", [(0, 0, 1), (1, 1, 1), (1, 1, 0)], ids=["001", "111", "110"])
 def test_geometry_gate_accepts_every_orientation(miller):
     """The gate must be silent on the three orientations the CLI exposes."""
