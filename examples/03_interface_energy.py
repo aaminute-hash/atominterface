@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""End-to-end interface formation energy: Cu(001) | Ni(001).
+"""End-to-end interface formation energy: Cu(hkl) | Ni(hkl).
+
+The orientation is a flag: ``--sub-miller`` / ``--film-miller`` take any
+Miller triple and default to (0, 0, 1), the documented Cu(001) | Ni(001)
+reference.  Every other surface runs the same chain.
 
 Runs the full energy ledger behind an interface formation energy, with
 one calculator setting (same backend, same device) for every term:
@@ -320,7 +324,10 @@ class EnergyLedger:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the demo's command line (mirrors ``atominterface build``)."""
     parser = argparse.ArgumentParser(
-        description="Cu(001) | Ni(001) interface formation energy, end to end."
+        description=(
+            "Cu/Ni interface formation energy, end to end. The orientation is set by "
+            "--sub-miller/--film-miller and defaults to the documented Cu(001) | Ni(001)."
+        )
     )
     parser.add_argument(
         "--backend",
@@ -464,6 +471,29 @@ def _single_point(atoms, calculator) -> tuple[float, object]:
     if not np.all(np.isfinite(forces)):
         raise ValueError("single-point forces are not finite")
     return energy, measured
+
+
+def _miller_label(miller) -> str:
+    """``(hkl)`` as the conventional parenthesised triple, for banners.
+
+    Negative indices are written with a leading minus rather than an
+    overbar: unambiguous in a terminal, and it round-trips through a
+    copy-paste back into ``--sub-miller``.
+    """
+    return "(" + "".join(str(int(index)) for index in miller) + ")"
+
+
+def _banner(args) -> str:
+    """Opening line of the run, naming the surfaces actually being built.
+
+    Derived from the flags rather than spelled out: ``--sub-miller`` /
+    ``--film-miller`` make (001) one case among many, and a banner stuck
+    on "Cu(001) | Ni(001)" would misdescribe every run it printed above.
+    """
+    return (
+        f"== Cu{_miller_label(args.sub_miller)} | "
+        f"Ni{_miller_label(args.film_miller)} interface formation energy =="
+    )
 
 
 def _surface_normal(atoms, miller) -> np.ndarray:
@@ -1191,7 +1221,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
     substrate, film = _load_bulks()
     substrate_atoms = _to_ase(substrate)
     film_atoms = _to_ase(film)
-    print("== Cu(001) | Ni(001) interface formation energy ==")
+    print(_banner(args))
     print(f"substrate: Cu fcc, a={np.linalg.norm(substrate_atoms.cell[0]):.3f} A")
     print(f"film     : Ni fcc, a={np.linalg.norm(film_atoms.cell[0]):.3f} A")
 

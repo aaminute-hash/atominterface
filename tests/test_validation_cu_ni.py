@@ -257,6 +257,33 @@ def test_coherent_bulk_energy_strains_the_surface_plane_not_cartesian_xy(example
             )
 
 
+@pytest.mark.parametrize(
+    ("sub_miller", "film_miller", "expected"),
+    [
+        ((0, 0, 1), (0, 0, 1), "Cu(001) | Ni(001)"),
+        ((1, 1, 1), (1, 1, 1), "Cu(111) | Ni(111)"),
+        ((1, 1, 0), (1, 1, 1), "Cu(110) | Ni(111)"),
+    ],
+    ids=["001", "111", "mixed"],
+)
+def test_stdout_banner_names_the_surfaces_being_built(example03, sub_miller, film_miller, expected):
+    """The banner is derived from the flags, not hardcoded to (001).
+
+    A run at ``--sub-miller 1 1 1`` used to announce itself as
+    "Cu(001) | Ni(001)" while printing (111) numbers underneath, which is
+    the worst kind of wrong: the output looks self-consistent.
+    """
+    argv = [
+        "--backend",
+        "dummy",
+        "--sub-miller",
+        *(str(index) for index in sub_miller),
+        "--film-miller",
+        *(str(index) for index in film_miller),
+    ]
+    assert expected in example03._banner(example03._parse_args(argv))
+
+
 def test_biaxial_deformation_reduces_to_axis_scaling_for_001(example03):
     """(001) bit-compatibility: the tensor is exactly ``diag(1+e, 1+e, 1+sz)``.
 
