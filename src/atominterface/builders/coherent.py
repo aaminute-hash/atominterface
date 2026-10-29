@@ -18,7 +18,7 @@ import warnings
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
@@ -131,23 +131,37 @@ PUBLISHED_MILLER: tuple[int, int, int] = (0, 0, 1)
 _STRAIN_TIE_DIGITS = 4
 
 
-def _warn_unscanned_orientation(config) -> None:
-    """Say out loud that a non-(001) orientation ships one unscanned registry.
+def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
+    """Say out loud that a non-(001) run ships one unscanned registry.
 
-    The geometry gate cannot catch this and must not be stretched to.
-    A non-(001) board can be perfectly level, conserve its area and keep
-    a healthy in-plane period while sitting on a high-symmetry lateral
-    registry, because a high-symmetry site is not a geometry violation:
-    its in-plane gradient vanishes by symmetry, so the relaxation stops
-    where it started -- converged, fmax met, OOD green, valid=True, and
-    wrong. Measured on Cu/Ni, the (110) default ridge site gives
-    gamma_int = 0.5953 J/m^2 against a scanned 0.088, 6.8x high, with a
-    shortest contact of 2.27 A that no proximity check would flag.
+    Three things the caller cannot see from the output otherwise.
+
+    The registry is whatever the builder produced, and the builder makes
+    it a function of ``--min-thickness``: on Cu/Ni(111), 10.8 / 14.4 /
+    18.0 / 21.6 A start at fcc-hollow / on-top / fcc-hollow / hcp-hollow
+    and give gamma_int 0.081 / 0.898 / 0.081 / 0.081 J/m^2. Nothing
+    slides during relaxation -- every final registry was bit-identical to
+    its initial one -- so a jump across a thickness scan is the registry
+    changing, not the thickness failing to converge. That is a pure
+    artefact, and it reads exactly like the convergence failure it is
+    not.
+
+    The geometry gate cannot catch any of this and must not be stretched
+    to: a non-(001) board can be level, conserve its area and keep a
+    healthy in-plane period while sitting on a high-symmetry registry,
+    where the in-plane gradient vanishes by symmetry and the relaxation
+    stops where it started -- converged, fmax met, OOD green, valid=True,
+    and wrong. The (110) default ridge site reads 0.5953 J/m^2 against a
+    scanned 0.088, 6.8x high, with a shortest contact of 2.27 A that no
+    proximity check would flag.
 
     Relaxing longer does not help and is worth saying so: 900 steps left
-    the (110) ridge site bit-identical, and only a thickness step that
-    happened to accumulate in-plane shear moved it off. The fix is to
-    scan the registry and quote that minimum, not to relax harder.
+    the (110) ridge site bit-identical. The fix is to scan the registry
+    and quote that minimum, not to relax harder.
+
+    ``lateral`` is the as-built registry in A, measured once per
+    assembly. It is quoted so two runs can be checked for being the same
+    run before their gamma_int is compared at all.
     """
     off_001 = [
         f"{side} {tuple(int(index) for index in miller)}"
@@ -157,21 +171,34 @@ def _warn_unscanned_orientation(config) -> None:
     if not off_001:
         return
 
+    registry = (
+        f"as-built lateral offset: {lateral:.6f} A (in-plane part of the closest "
+        "substrate/film pair; two runs are comparable only if this matches). "
+        if lateral is not None
+        else ""
+    )
     warnings.warn(
         f"[orientation] {' and '.join(off_001)}: this orientation is not (001), so the "
-        "lateral registry the builder hands over has not been scanned and may sit on a "
-        "high-symmetry site. Such a site is not a geometry violation -- it is level, "
-        "conserves its area and keeps a healthy in-plane period -- but its in-plane "
-        "gradient vanishes by symmetry, so a relaxation stops where it started: "
-        "converged, fmax met, OOD green, valid=True, and wrong. Measured on Cu/Ni the "
-        "(110) default ridge site gives gamma_int = 0.5953 J/m^2 against a scanned "
-        "0.088 (6.8x high), and (111) at 14.4 A locks on-top at 5.9x (7 Cu against 8 "
-        "Ni layers). A longer relaxation does not fix it: 900 steps left the (110) "
-        "ridge site bit-identical, and only a thickness step that accumulated in-plane "
-        "shear moved it. Run an explicit registry scan and quote its minimum before "
-        "citing gamma_int for a non-(001) orientation. (001) is the exception: the "
-        "published protocol enumerated ten candidates itself, which is why its value "
-        "can be quoted directly.",
+        "lateral registry the builder hands over has not been scanned -- and it is a "
+        "function of --min-thickness rather than of anything physical. Measured on "
+        "Cu/Ni(111): 10.8 / 14.4 / 18.0 / 21.6 A start at fcc-hollow / on-top / "
+        "fcc-hollow / hcp-hollow and give gamma_int 0.081 / 0.898 / 0.081 / 0.081 "
+        "J/m^2, an 11x step from the thickness knob alone. No thickness slid away from "
+        "its starting registry during relaxation -- every final registry was "
+        "bit-identical to its initial one -- so a jump across a thickness scan is the "
+        "registry changing, not the thickness failing to converge; compare registries "
+        f"before reading anything into a thickness scan. {registry}"
+        "The site itself is not a geometry violation: it is level, conserves its area "
+        "and keeps a healthy in-plane period, but on a high-symmetry registry the "
+        "in-plane gradient vanishes by symmetry, so a relaxation stops where it "
+        "started -- converged, fmax met, OOD green, valid=True, and wrong. (110) shows "
+        "the same thing from its default ridge site: 0.5953 J/m^2 against a scanned "
+        "0.088, 6.8x high. A longer relaxation does not fix it: 900 steps left that "
+        "site bit-identical, and only a thickness step that accumulated in-plane shear "
+        "moved it. Run an explicit registry scan and quote its minimum before citing "
+        "gamma_int for a non-(001) orientation. (001) is the exception: the published "
+        "protocol enumerated ten candidates itself, which is why its value can be "
+        "quoted directly.",
         stacklevel=2,
     )
 
@@ -1069,8 +1096,61 @@ def _check_inplane_period(side: str, slab, max_strain: float) -> float:
     )
 
 
+class _RegistryPair(NamedTuple):
+    """The closest substrate/film pair across the join, and how it is offset.
+
+    ``lateral`` -- the in-plane part of their minimum-image separation --
+    is the registry.  It is what a registry scan varies and what two runs
+    have to match before their gamma_int can be compared, so it is
+    measured once per assembly and reused by both consumers rather than
+    derived twice by two different routes that could disagree.
+    """
+
+    distance: float
+    lateral: float
+    substrate_index: int
+    film_index: int
+    du: float
+    dv: float
+
+
+def _closest_cross_pair(interface, n_substrate: int) -> _RegistryPair | None:
+    """Closest substrate/film pair in ``interface``, with its lateral offset.
+
+    ``None`` when one side is empty, so there is no join to measure.
+    """
+    from atominterface.relax.proximity import nearest_image_vectors, pairwise_distance_matrix
+
+    if n_substrate <= 0 or n_substrate >= len(interface):
+        return None
+    atoms = _to_ase(interface)
+    matrix = pairwise_distance_matrix(atoms)
+    cross = matrix[:n_substrate, n_substrate:]
+    flat = int(np.argmin(cross))
+    i, j = divmod(flat, cross.shape[1])
+    distance = float(cross[i, j])
+
+    # Lateral part of the minimum-image separation: the pair's offset
+    # within the interface plane, with the normal component removed.
+    vectors, _ = nearest_image_vectors(atoms, atoms.positions[i])
+    cell = np.asarray(interface.lattice.matrix, dtype=np.float64)
+    normal = np.cross(cell[0], cell[1])
+    normal = normal / np.linalg.norm(normal)
+    separation = vectors[n_substrate + j]
+    lateral_vector = separation - float(separation @ normal) * normal
+    lateral = float(np.linalg.norm(lateral_vector))
+    # Rounded to the precision the message prints, then ``+ 0.0`` to turn
+    # the -0.0 a tiny negative component leaves behind into +0.0: an
+    # exactly opposed pair has to read "du=0.000000", because "du=-0.000000"
+    # invites the reader to go looking for an offset that is not there.
+    fit = np.linalg.lstsq(cell[:2].T, lateral_vector, rcond=None)[0]
+    du = float(np.round(fit[0], 6)) + 0.0
+    dv = float(np.round(fit[1], 6)) + 0.0
+    return _RegistryPair(distance, lateral, i, n_substrate + j, du, dv)
+
+
 def _warn_interface_proximity(
-    interface, n_substrate: int, d_refs, max_strain: float, gap: float
+    interface, pair: _RegistryPair | None, d_refs, max_strain: float, gap: float
 ) -> None:
     """Criterion D, advisory only: is the closest cross-interface pair a bond?
 
@@ -1099,46 +1179,21 @@ def _warn_interface_proximity(
     shallow basin rather than a stationary point.  Calling both
     "symmetric" would make the message assert something false.
     """
-    from atominterface.relax.proximity import nearest_image_vectors, pairwise_distance_matrix
-
     measured = [d for d in d_refs if math.isfinite(d)]
-    if not measured or n_substrate <= 0 or n_substrate >= len(interface):
+    if not measured or pair is None:
         return
     threshold = min(measured) * (1.0 - float(max_strain))
-    atoms = _to_ase(interface)
-    matrix = pairwise_distance_matrix(atoms)
-    cross = matrix[:n_substrate, n_substrate:]
-    flat = int(np.argmin(cross))
-    i, j = divmod(flat, cross.shape[1])
-    distance = float(cross[i, j])
-    if distance >= threshold:
+    if pair.distance >= threshold:
         return
-
-    # Lateral part of the minimum-image separation: the pair's offset
-    # within the interface plane, with the normal component removed.
-    vectors, _ = nearest_image_vectors(atoms, atoms.positions[i])
-    cell = np.asarray(interface.lattice.matrix, dtype=np.float64)
-    normal = np.cross(cell[0], cell[1])
-    normal = normal / np.linalg.norm(normal)
-    separation = vectors[n_substrate + j]
-    lateral_vector = separation - float(separation @ normal) * normal
-    lateral = float(np.linalg.norm(lateral_vector))
-    # Rounded to the precision the message prints, then ``+ 0.0`` to turn
-    # the -0.0 a tiny negative component leaves behind into +0.0: an
-    # exactly opposed pair has to read "du=0.000000", because "du=-0.000000"
-    # invites the reader to go looking for an offset that is not there.
-    fit = np.linalg.lstsq(cell[:2].T, lateral_vector, rcond=None)[0]
-    du = float(np.round(fit[0], 6)) + 0.0
-    dv = float(np.round(fit[1], 6)) + 0.0
-    on_top = lateral <= ON_TOP_LATERAL_TOL
+    on_top = pair.lateral <= ON_TOP_LATERAL_TOL
 
     warnings.warn(
         f"[geometry gate] criterion D (interface proximity) on the assembled interface: "
-        f"closest substrate/film pair is {distance:.6f} A, below the {threshold:.6f} A "
+        f"closest substrate/film pair is {pair.distance:.6f} A, below the {threshold:.6f} A "
         f"contact scale (d_ref {min(measured):.6f} A x (1 - {float(max_strain):.6f})); "
         f"the requested gap was {float(gap):.6f} A. "
-        f"pair: {_pair_label(interface, i, n_substrate + j)}. "
-        f"lateral offset = {lateral:.6f} A (du={du:.6f}, dv={dv:.6f}). "
+        f"pair: {_pair_label(interface, pair.substrate_index, pair.film_index)}. "
+        f"lateral offset = {pair.lateral:.6f} A (du={pair.du:.6f}, dv={pair.dv:.6f}). "
         "Advisory, and ambiguous on distance alone: a pair sharing u, v whose w straddles "
         "the join is the gap you asked for and will relax apart; a pair inside one board "
         "means the two sides were pushed into each other. Read w before acting."
@@ -1308,11 +1363,18 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         site_properties=site_properties,
     )
     _attach_charge_geometry(interface, substrate_slab, film_slab, vacuum)
+    # The registry is measured here, once, and handed to both consumers:
+    # criterion D quotes it, and the orientation advisory names it so two
+    # runs can be compared. Two independent routes to the same number
+    # would be two chances to disagree about what the run shipped.
+    registry = _closest_cross_pair(interface, len(substrate_slab))
+    if registry is not None:
+        interface.properties["registry_lateral_offset"] = registry.lateral
     # Advisory, and deliberately bounded by ``gap`` as well as by the bond
     # scale: ``gap`` is a separation the caller asked for, so a pair at the
     # join sitting at ``gap`` is a request being honoured, not a collision.
     # Only a pair closer than the smaller of the two is worth reporting.
-    _warn_interface_proximity(interface, len(substrate_slab), d_refs, max_strain, gap)
+    _warn_interface_proximity(interface, registry, d_refs, max_strain, gap)
     # Which in-plane cell each side actually occupies in the stack.  The
     # substrate is the reference and is never deformed; the film either
     # inherits that cell or, when nothing was strained, keeps its own --
@@ -1475,6 +1537,12 @@ def _to_candidate(
         "geometry": "coherent-supercell",
         "gap_ang": config.gap,
         "vacuum_ang": config.vacuum_thickness,
+        # Measured once during assembly (see ``_closest_cross_pair``) and
+        # carried through so a downstream reader can tell two candidates
+        # apart by the site they start on, not only by their energy.
+        "registry_lateral_offset_ang": (getattr(interface, "properties", None) or {}).get(
+            "registry_lateral_offset"
+        ),
         **match.metadata,
         "rotation_matrix": None if match.rotation is None else match.rotation.tolist(),
     }
@@ -1778,17 +1846,34 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         if errors:
             raise ValueError("; ".join(errors))
 
-        # Once per build, not per candidate: the warning is about the
-        # orientation the run was configured with, and every candidate of
-        # that run shares it.
-        _warn_unscanned_orientation(self.config)
-
         slabs = self._prepared_slabs()
         matches = self._match(slabs=slabs)
         if not matches:
             self.last_build_report["empty_stage"] = "no_matches"
             return []
 
+        candidates = self._collect_candidates(matches, slabs)
+
+        if not candidates:
+            self.last_build_report["empty_stage"] = (
+                "charge_filter" if self.last_build_report["rejected"] else "assembly"
+            )
+        # Once per build, and only after assembly: the message quotes the
+        # registry that was actually built, which does not exist yet when
+        # the config is read.  ``None`` keeps the advisory useful even when
+        # nothing assembled -- the orientation is still unscanned.
+        _warn_unscanned_orientation(self.config, self._built_lateral_offset(candidates))
+        return candidates
+
+    def _collect_candidates(self, matches: list[_MatchInfo], slabs) -> list[Candidate]:
+        """Assemble every accepted candidate up to the configured limit.
+
+        Separate from ``build_all`` so that hitting ``max_candidates``
+        cannot return before the per-build advisories are emitted: the
+        orientation warning carries a number measured during assembly, and
+        an early ``return`` here would silently drop it on exactly the
+        runs that build the most candidates.
+        """
         candidates: list[Candidate] = []
         for match in matches:
             for sub_idx, sub_slab in slabs[0]:
@@ -1799,12 +1884,22 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
                     if len(candidates) >= self.config.max_candidates:
                         self.last_build_report["stopped_at_limit"] = True
                         return candidates
-
-        if not candidates:
-            self.last_build_report["empty_stage"] = (
-                "charge_filter" if self.last_build_report["rejected"] else "assembly"
-            )
         return candidates
+
+    @staticmethod
+    def _built_lateral_offset(candidates: Sequence[Candidate]) -> float | None:
+        """The as-built registry of the first assembled candidate, in A.
+
+        Handing the warning a number instead of a description is the whole
+        point: two non-(001) runs are only comparable if they started on
+        the same site, and that is a distance the caller cannot see from
+        anything else in the output.
+        """
+        for candidate in candidates:
+            lateral = candidate.metadata.get("registry_lateral_offset_ang")
+            if isinstance(lateral, (int, float)):
+                return float(lateral)
+        return None
 
     def _build_candidate(self, match, sub_idx, sub_slab, film_idx, film_slab):
         report = self.last_build_report

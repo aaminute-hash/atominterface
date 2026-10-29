@@ -14,6 +14,7 @@ and mirrors its own half-board, so it gets the same leveling.
 from __future__ import annotations
 
 import math
+import re
 import warnings
 from unittest.mock import patch
 
@@ -626,6 +627,24 @@ def test_non_001_orientation_warns_that_the_registry_was_never_scanned(miller):
     # ...and the one piece of advice that must NOT be given: relaxing
     # longer was measured not to help, so the message has to say so.
     assert "900 steps" in message
+
+    # The thickness knob moves the registry, which makes a thickness scan
+    # read like a convergence failure.  10.8 / 14.4 / 18.0 / 21.6 A gave
+    # 0.081 / 0.898 / 0.081 / 0.081 J/m^2 on Cu/Ni(111): an 11x step from
+    # the thickness alone, with nothing sliding during relaxation.
+    assert "0.898" in message and "11x" in message
+
+    # The one number that makes two non-(001) runs comparable at all: the
+    # as-built registry, in A, measured once during assembly.  Asserted
+    # against the value carried on the candidate rather than against a
+    # literal, so the test breaks if the message ever stops quoting the
+    # measured offset and starts quoting a placeholder.
+    # Matched against the un-lowered text: the unit has to stay "A".
+    quoted = re.search(r"as-built lateral offset: ([0-9.]+) A", str(advisory[0].message))
+    assert quoted is not None
+    assert float(quoted.group(1)) == pytest.approx(
+        float(candidates[0].metadata["registry_lateral_offset_ang"]), abs=1e-6
+    )
 
 
 def test_001_orientation_is_not_warned_about():
