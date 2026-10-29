@@ -8,6 +8,9 @@ All values below are measured on Cu(001)|Ni(001) with MACE-MP-0 medium,
 float32, using the coherent bulk reference. The underlying data is in
 [`validation/cu_ni_001_multi_candidate/`](validation/cu_ni_001_multi_candidate/)
 and the analysis in [`validation_cu_ni_001.md`](validation_cu_ni_001.md).
+Non-(001) orientations are archived separately in
+[`validation/cu_ni_multi_orientation/`](validation/cu_ni_multi_orientation/) —
+read its four caveats before quoting any number from it.
 
 ---
 
