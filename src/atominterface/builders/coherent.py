@@ -32,6 +32,7 @@ from atominterface.builders.charge import (
     CHARGE_KNOWN,
     CHARGE_SOURCE,
     SLAB_ID,
+    _orient_slab,
     _site_dependent_charge,
     analyze_charge_polarity,
     charge_rejection_reasons,
@@ -74,13 +75,6 @@ __all__ = [
 # Strains within 1e-4 (0.01 %) of each other are treated as equally good
 # when ranking lattice matches; see ``_match_lattices``.
 _STRAIN_TIE_DIGITS = 4
-
-# Absolute tolerance (Å) below which a cell component counts as nothing
-# when deciding whether a slab already satisfies the "+z normal" contract
-# enforced by :func:`_orient_slab`.  Cell lengths are a few Å, so this is
-# ~1e-10 relative -- far above float64 round-off, far below any physical
-# or numerical quantity downstream.
-_ORIENT_TOL = 1e-9
 
 
 @dataclass(frozen=True)
@@ -401,65 +395,6 @@ def _prepare_charge_structure(structure, charges=None, oxidation_states=None):
         prepared.add_site_property(key, data[name].tolist())
     prepared.properties["charge_overridden_sources"] = data["overridden_sources"]
     return prepared
-
-
-def _orient_slab(slab):
-    """Return a slab whose surface normal is exactly ``+z``, ``a``/``b`` in ``xy``.
-
-    ``SlabGenerator(primitive=True)`` returns cells whose in-plane vectors
-    carry a z component for every surface but (001): fcc (111) comes back
-    as ``a = (1.81, 0, -1.81)``, ``b = (0, 1.81, -1.81)``.  Every
-    downstream ``[:2]`` slice then projects those vectors onto the xy
-    plane, which silently shrinks the interface area by ``sqrt(3)``
-    (3.2671 instead of 5.6587 Å²) and lets ``_assemble_interface`` rebuild
-    a hexagonal cell as a square one.  Rotating once here turns that
-    assumption into a fact for every consumer further down the chain
-    instead of patching six separate slices.
-
-    The rotation is applied to the orthogonal-c form so that ``c`` really
-    is parallel to ``cross(a, b)`` -- clearing the in-plane part of a skew
-    ``c`` would otherwise discard ~40 Å of real cell vector.
-
-    A slab that already satisfies the contract is handed back unchanged
-    and **bit-identical**, which is what keeps the published (001)
-    reference numbers pinned.
-    """
-    from pymatgen.core import Structure
-    from pymatgen.core.lattice import Lattice as _Lattice
-
-    matrix = np.asarray(slab.lattice.matrix, dtype=np.float64)
-    already_aligned = max(
-        abs(float(matrix[0, 2])),
-        abs(float(matrix[1, 2])),
-        abs(float(matrix[2, 0])),
-        abs(float(matrix[2, 1])),
-    )
-    if already_aligned <= _ORIENT_TOL:
-        return slab
-
-    orth = slab.get_orthogonal_c_slab()  # c perpendicular to a, b
-    L = np.asarray(orth.lattice.matrix, dtype=np.float64)
-    n = np.cross(L[0], L[1])
-    n = n / np.linalg.norm(n)
-    if n[2] < 0:
-        n = -n
-    e1 = L[0] / np.linalg.norm(L[0])
-    e2 = np.cross(n, e1)
-    e2 = e2 / np.linalg.norm(e2)
-    rot = np.vstack([e1, e2, n])  # rows are the new basis vectors, in old coordinates
-    new_L = L @ rot.T
-    new_L[2, :2] = 0.0  # defensive: drop any residual in-plane part of c
-    coords = np.asarray(orth.cart_coords, dtype=np.float64) @ rot.T
-    out = Structure(
-        _Lattice(new_L),
-        list(orth.species),
-        coords,
-        coords_are_cartesian=True,
-        to_unit_cell=False,
-        site_properties={key: list(values) for key, values in orth.site_properties.items()},
-    )
-    out.properties.update(getattr(orth, "properties", {}) or {})
-    return out
 
 
 def _get_terminations(structure, miller, min_thickness, vacuum_thickness):

@@ -7,7 +7,8 @@ above the top plane.  pymatgen hands back cells whose in-plane vectors
 carry a z component for every surface but (001), so :func:`_orient_slab`
 rotates them level first -- after which ``cross(a1, a2)`` *is* the
 cartesian z axis and the plain ``[:2]`` slices the builders live by are
-exact rather than a silent projection.
+exact rather than a silent projection.  The mirror-symmetric route cuts
+and mirrors its own half-board, so it gets the same leveling.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from atominterface.builders.charge import finite_slab_geometry
+from atominterface.builders.charge import finite_slab_geometry, make_symmetric_slab
 from atominterface.builders.coherent import (
     CoherentInterfaceBuilder,
     CoherentInterfaceConfig,
@@ -495,3 +496,74 @@ def test_oriented_slab_keeps_the_finite_slab_provenance():
     assert geometry["finite_slab"] is True
     assert geometry["vacuum_reference"] is not None
     assert set(slab.site_properties) >= {"bulk_equivalent", "bulk_wyckoff"}
+
+
+# ---------------------------------------------------------------------------
+# Mirror-symmetric boards.  ``make_symmetric_slab`` cuts and mirrors its own
+# half-board, so it needs the same leveling the plain route gets -- and it has
+# to keep doing the charge bookkeeping correctly afterwards.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("miller", ORIENTATIONS, ids=lambda row: f"{row[0]}")
+def test_symmetric_slab_is_level_along_z(miller):
+    """A mirrored board must come back with its true normal along +z too.
+
+    The mirroring helper itself projects onto ``cross(a, b)``, so it is
+    orientation-agnostic -- which means nothing downstream of it will notice
+    if the board it produced is skewed.  Before the leveling was added here
+    an fcc (111) symmetric board carried a 1.807 A skew and a squared-up
+    -3.2671 A^2- cell, and the builder assembled that silently.
+    """
+    result = make_symmetric_slab(_fcc("Cu", 3.615), miller[0], min_thickness=14.4, vacuum=15.0)
+    board = result.structure
+    matrix = np.asarray(board.lattice.matrix, dtype=float)
+
+    assert _level_violation(matrix) < LEVEL_TOL
+    area = float(np.linalg.norm(np.cross(matrix[0], matrix[1])))
+    assert area == pytest.approx(result.area, rel=1e-12)
+    # Layer counting off cartesian z now works, which it did not before:
+    # the skewed cell read 8 planes at 2.0657 A instead of 9 at 2.0871 A.
+    levels = np.unique(np.round(np.asarray(board.cart_coords, dtype=float)[:, 2], 4))
+    gaps = np.diff(levels)
+    assert np.allclose(gaps, miller[1] * 3.615, atol=1e-3)
+
+
+def test_symmetric_111_board_keeps_its_charge_bookkeeping():
+    """Leveling the board must leave the charge layer's verdicts alone.
+
+    ``analyze_charge_polarity`` projects onto ``cross(a, b)``, so the
+    polarity bookkeeping is invariant under the rotation -- this pins it,
+    because the naive way to place the leveling call (after the analysis)
+    would have rebuilt the board with its provenance property stripped.
+    """
+    board = make_symmetric_slab(_fcc("Cu", 3.615), (1, 1, 1), min_thickness=14.4, vacuum=15.0)
+
+    assert board.structure.properties.get("ai_slab_generated") is True
+    geometry = finite_slab_geometry(board.structure)
+    assert geometry["finite_slab"] is True
+    assert geometry["vacuum_reference"] is not None
+    assert board.n_formula_units == pytest.approx(2.25, rel=1e-12)
+
+
+def test_symmetric_interface_candidates_carry_the_true_area():
+    """``symmetric_slabs=True`` through the builder, end to end."""
+    config = CoherentInterfaceConfig(
+        substrate_miller=(1, 1, 1),
+        film_miller=(1, 1, 1),
+        relax_terminations=False,
+        symmetric_slabs=True,
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    candidates = builder.build_all()
+    assert candidates
+
+    area_factor = ORIENTATIONS[1][2]
+    for candidate in candidates[:2]:
+        cell = np.asarray(candidate.atoms.cell.array, dtype=float)
+        assert _level_violation(cell) < LEVEL_TOL
+        expected = area_factor * 3.615**2 * candidate.metadata["substrate_supercell_multiplicity"]
+        assert candidate.area == pytest.approx(expected, rel=1e-9)
+        assert _shortest_inplane_period(cell) >= NN_LIMIT - 1e-6
