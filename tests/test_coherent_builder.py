@@ -920,13 +920,28 @@ def test_build_auto_mode_warns_about_polar_termination_without_transforming():
     assert candidate.metadata["nominal_charge"] == 0.0
 
 
+def _unexpected_warnings(caught):
+    """Warnings these charge tests care about: anything but the geometry gate.
+
+    The gate emits an advisory note whenever the join sits inside a bond,
+    which on-top stacking at the default 2.0 A gap always does.  That is a
+    separate concern from the polarity bookkeeping under test here, and
+    ``tests/test_slab_geometry.py`` owns it.
+    """
+    return [
+        w
+        for w in caught
+        if issubclass(w.category, UserWarning) and "geometry gate" not in str(w.message)
+    ]
+
+
 def test_build_symmetric_true_transforms_and_marks_candidates():
     builder = _polar_builder(symmetric_slabs=True)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         candidates = builder.build()
 
-    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+    assert not _unexpected_warnings(caught)
     candidate = candidates[0]
     assert candidate.metadata["symmetric"] is True
     # A mirror-symmetric board has no net normal dipole.
@@ -942,7 +957,7 @@ def test_build_symmetric_false_is_silent_and_untransformed():
         warnings.simplefilter("always")
         candidates = builder.build()
 
-    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+    assert not _unexpected_warnings(caught)
     assert candidates[0].metadata["symmetric"] is False
     assert candidates[0].metadata["polar"] is True
 

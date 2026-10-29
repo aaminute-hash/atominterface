@@ -17,6 +17,7 @@ from atominterface.builders.charge import analyze_charge_polarity
 from atominterface.builders.coherent import (
     CoherentInterfaceBuilder,
     CoherentInterfaceConfig,
+    GeometryGateError,
     reference_slabs,
 )
 from atominterface.builders.registry import (
@@ -37,6 +38,7 @@ __all__ = [
     "InterfaceBuilder",
     "CoherentInterfaceBuilder",
     "CoherentInterfaceConfig",
+    "GeometryGateError",
     "analyze_charge_polarity",
     "BuilderRegistry",
     "builder_registry",

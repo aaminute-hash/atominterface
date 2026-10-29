@@ -69,8 +69,42 @@ except ImportError:  # pragma: no cover - optional dependency
 __all__ = [
     "CoherentInterfaceConfig",
     "CoherentInterfaceBuilder",
+    "GeometryGateError",
     "reference_slabs",
 ]
+
+
+class GeometryGateError(ValueError):
+    """An assembled interface violates a geometry invariant.
+
+    Raised by :func:`_assemble_interface` when a board's in-plane cell
+    would be misread downstream.  Every slice the builder chain takes
+    (``lattice[:2, :2]``, ``cart_coords[:, 2]``) reads the cell as if
+    ``a`` and ``b`` were level and ``c`` carried the vacuum -- which
+    :func:`_orient_slab` guarantees for generated boards and nothing
+    guarantees for anything else.  A board that skips that step still
+    looks fine to the slicer: it just gets a *smaller* cell, and every
+    number derived from it (area, layer spacing, gamma) is quietly wrong.
+
+    There is deliberately no way to switch this off.  A geometry that
+    cannot be measured correctly cannot be reported correctly either, so
+    the only honest answer is to refuse the structure.
+    """
+
+
+#: Relative slack on criterion B.  Cell areas are tens of A^2, so 1e-6 is
+#: ~1e-5 A^2 -- four orders below the last digit anyone reports, and six
+#: orders above the ~1e-3 relative loss a (111) projection produces.
+AREA_CONSERVATION_RTOL = 1e-6
+
+#: Half-width of the ``(m, n)`` search for the shortest in-plane vector.
+#: 4 covers every combination a coherent match up to ``max_area`` can
+#: produce while still costing 80 norm evaluations.
+INPLANE_PERIOD_RANGE = 4
+
+#: Relative slack on criterion C, so the gate trips on a real compression
+#: and not on the last ulp of a period measured equal to its bound.
+INPLANE_PERIOD_RTOL = 1e-9
 
 # Strains within 1e-4 (0.01 %) of each other are treated as equally good
 # when ranking lattice matches; see ``_match_lattices``.
@@ -847,6 +881,224 @@ def _strain_film_onto(film_slab, substrate_slab_2d):
     return strained
 
 
+def _shortest_inplane_period(in_plane: np.ndarray) -> tuple[float, int, int]:
+    """Shortest ``|m*a + n*b|`` over ``m, n`` in ``[-4, 4]``, as ``(length, m, n)``.
+
+    Brute force rather than ``min(|a|, |b|)``: a basis can be reduced in
+    area and still carry a *combination* far shorter than either vector --
+    ``a = (2.556, 0)``, ``b = (3 * 2.556 + 0.05, 0.3)`` reads
+    ``min(|a|, |b|) = 2.556`` but repeats every ``|b - 3 a| = 0.304 A``.
+    Reading ``|a|`` alone would call that cell healthy.
+    """
+    best = (float("inf"), 0, 0)
+    for m in range(-INPLANE_PERIOD_RANGE, INPLANE_PERIOD_RANGE + 1):
+        for n in range(-INPLANE_PERIOD_RANGE, INPLANE_PERIOD_RANGE + 1):
+            if m == 0 and n == 0:
+                continue
+            length = float(np.linalg.norm(m * in_plane[0] + n * in_plane[1]))
+            if length < best[0]:
+                best = (length, m, n)
+    return best
+
+
+def _pair_label(slab, i: int, j: int) -> str:
+    """``#3 Cu (u=..., v=..., w=...) / #7 Ni (...)`` for two sites.
+
+    The fractional coordinates are the point.  A pair that is too close
+    is ambiguous on distance alone: two atoms facing each other across
+    the join (same ``u, v``, ``w`` straddling the interface) are the
+    intended small gap, while two atoms inside one plane are a cell that
+    was compressed.  Only ``w`` separates those, so it is always shown.
+    """
+    # Wrapped into the cell: the builders keep ``to_unit_cell=False``, so
+    # raw fractional coordinates arrive as -6.33 rather than 0.67 and say
+    # nothing about where in the stack the pair actually sits.
+    coords = np.mod(np.asarray(slab.frac_coords, dtype=np.float64), 1.0)
+    species = [str(entry) for entry in slab.species]
+
+    def _site(index: int) -> str:
+        u, v, w = coords[index]
+        return f"#{index} {species[index]} (u={u:.6f}, v={v:.6f}, w={w:.6f})"
+
+    return f"{_site(i)} / {_site(j)}"
+
+
+def _check_area_conservation(side: str, before: np.ndarray, after, transform) -> None:
+    """Criterion B: the in-plane block the stack uses spans the board's area.
+
+    Replication by an integer supercell multiplies the area by exactly
+    ``|det(transform)|``, and a level board's ``[:2, :2]`` block *is* its
+    interface plane -- so the area the assembly writes into the interface
+    cell has to equal the unscaled board's area times the multiplicity.
+    Any gap between the two says ``a`` or ``b`` carries a z component and
+    ``[:2, :2]`` is a projection onto xy rather than the plane itself.
+
+    ``before`` is the pre-scaling lattice matrix and ``transform`` the
+    supercell description (``None`` when nothing was scaled).
+    """
+    multiplicity = 1 if transform is None else _multiplicity(transform)
+    expected = _lattice_area(np.asarray(before, dtype=np.float64)) * multiplicity
+    if not math.isfinite(expected) or expected <= 0.0:
+        return
+
+    matrix = np.asarray(after.lattice.matrix, dtype=np.float64)
+    # The two areas are only the same number for a level cell; reported
+    # separately so the message says which step lost the area.
+    true_area = _lattice_area(matrix)
+    used_area = float(abs(np.linalg.det(matrix[:2, :2])))
+    deviation = max(abs(true_area - expected), abs(used_area - expected)) / expected
+    if deviation <= AREA_CONSERVATION_RTOL:
+        return
+
+    raise GeometryGateError(
+        f"[geometry gate] criterion B (area conservation) failed on the {side} side. "
+        f"measured in-plane block = {used_area:.6f} A^2, board's true cell area = "
+        f"{true_area:.6f} A^2, reference = {multiplicity} x {expected / multiplicity:.6f} A^2 "
+        f"= {expected:.6f} A^2; relative deviation {deviation:.3e} exceeds "
+        f"{AREA_CONSERVATION_RTOL:.1e}. "
+        f"a = ({matrix[0][0]:.6f}, {matrix[0][1]:.6f}, {matrix[0][2]:.6f}), "
+        f"b = ({matrix[1][0]:.6f}, {matrix[1][1]:.6f}, {matrix[1][2]:.6f}): "
+        "a or b carries a z component, so lattice[:2, :2] is the xy projection of the "
+        "interface plane instead of the plane itself, and every area, spacing and gamma "
+        "derived from this stack is scaled by that projection. Level the board first."
+    )
+
+
+def _check_inplane_period(side: str, slab, max_strain: float) -> float:
+    """Criterion C: the in-plane cell must still repeat at a physical period.
+
+    The board's tightest pair sets the scale: nothing in a relaxed board
+    sits closer than a nearest-neighbour shell, and the coherent match is
+    allowed to compress that by at most ``max_strain``.  A period below
+    ``d_ref * (1 - max_strain)`` means the cell the stack will repeat was
+    squeezed past what the chemistry allows -- which is what a projected
+    in-plane block does, since a projection can only shorten vectors.
+
+    Returns the ``d_ref`` it measured so the caller can reuse the scale
+    (the proximity warning needs it); NaN when the board is too small to
+    establish one.
+    """
+    from atominterface.relax.proximity import pairwise_min_distance
+
+    if len(slab) < 2:
+        return float("nan")
+    d_ref, i, j = pairwise_min_distance(_to_ase(slab))
+    if not math.isfinite(d_ref):
+        return float("nan")
+
+    matrix = np.asarray(slab.lattice.matrix, dtype=np.float64)
+    period, m, n = _shortest_inplane_period(matrix[:2, :2])
+    threshold = d_ref * (1.0 - float(max_strain))
+    if period >= threshold * (1.0 - INPLANE_PERIOD_RTOL):
+        return d_ref
+
+    raise GeometryGateError(
+        f"[geometry gate] criterion C (in-plane period) failed on the {side} side. "
+        f"measured shortest in-plane period = {period:.6f} A "
+        f"({m}*a + {n}*b, over m, n in [{-INPLANE_PERIOD_RANGE}, {INPLANE_PERIOD_RANGE}]), "
+        f"threshold = {threshold:.6f} A = d_ref {d_ref:.6f} A x (1 - {float(max_strain):.6f}). "
+        f"d_ref is the tightest pair in the board: {_pair_label(slab, i, j)}. "
+        "A short period can be a compressed cell or an intended small gap -- read the "
+        "fractional coordinates: a pair with the same u, v whose w straddles the join is "
+        "the gap you asked for, a pair inside one plane is a cell that was squeezed."
+    )
+
+
+def _warn_interface_proximity(
+    interface, n_substrate: int, d_refs, max_strain: float, gap: float
+) -> None:
+    """Criterion D, advisory only: is the closest cross-interface pair a bond?
+
+    Deliberately a warning and not a gate.  ``config.gap`` (2.0 A by
+    default) is *shorter* than a Cu/Ni bond on purpose -- it hands the
+    relaxer a slightly compressed join to resolve -- so "closer than a
+    bond" is the normal state of a fresh interface and raising here would
+    reject every legitimate one.  It is still worth saying out loud,
+    because the same signature means two different things: the join the
+    caller asked for, or two boards pushed into each other.  The distance
+    cannot separate those; the fractional coordinates can, so they are
+    what the message leads with.
+    """
+    from atominterface.relax.proximity import pairwise_distance_matrix
+
+    measured = [d for d in d_refs if math.isfinite(d)]
+    if not measured or n_substrate <= 0 or n_substrate >= len(interface):
+        return
+    threshold = min(measured) * (1.0 - float(max_strain))
+    matrix = pairwise_distance_matrix(_to_ase(interface))
+    cross = matrix[:n_substrate, n_substrate:]
+    flat = int(np.argmin(cross))
+    i, j = divmod(flat, cross.shape[1])
+    distance = float(cross[i, j])
+    if distance >= threshold:
+        return
+
+    warnings.warn(
+        f"[geometry gate] criterion D (interface proximity) on the assembled interface: "
+        f"closest substrate/film pair is {distance:.6f} A, below the {threshold:.6f} A "
+        f"contact scale (d_ref {min(measured):.6f} A x (1 - {float(max_strain):.6f})); "
+        f"the requested gap was {float(gap):.6f} A. "
+        f"pair: {_pair_label(interface, i, n_substrate + j)}. "
+        "Advisory, and ambiguous on distance alone: a pair sharing u, v whose w straddles "
+        "the join is the gap you asked for and will relax apart; a pair inside one board "
+        "means the two sides were pushed into each other. Read w before acting.",
+        stacklevel=2,
+    )
+
+
+def _prepare_stack(substrate_slab, film_slab, match, max_strain):
+    """Replicate both boards, gate them, and strain the film onto the substrate.
+
+    Steps 1 and 2 of :func:`_assemble_interface`, plus the geometry gates
+    that have to bracket them: criterion B belongs right after the
+    replication (which must conserve area) and criterion C right after
+    the strain (which must not).  Returns ``(substrate_slab, film_slab,
+    sub_2d, sub_height, d_refs)`` -- the boards to stack, the substrate's
+    in-plane block and vacuum column, and the contact scale each side
+    measured.
+    """
+    # Criterion B runs on the *replicated* board, before the coherent
+    # strain: replication must conserve area and straining must not, so
+    # folding the two into one comparison would fire on every match.
+    sub_before = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64)
+    film_before = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
+    if match is not None:
+        substrate_slab = _scale_in_plane(substrate_slab, match.substrate_supercell)
+        film_slab = _scale_in_plane(film_slab, match.film_supercell)
+    _check_area_conservation(
+        "substrate", sub_before, substrate_slab, match.substrate_supercell if match else None
+    )
+    _check_area_conservation(
+        "film", film_before, film_slab, match.film_supercell if match else None
+    )
+
+    sub_mat = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64)
+    # In-plane block: exact, since ``_orient_slab`` guarantees a and b carry
+    # no z component and the vacuum column no in-plane one.
+    sub_2d = np.asarray(sub_mat[:2, :2], dtype=np.float64)
+    film_2d = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
+
+    # Strain the film onto the substrate cell.  The shared helper keeps
+    # the fractional coordinates -- i.e. the stacking sequence -- intact
+    # and is the very same call ``reference_slabs`` performs, so a
+    # reference board and the interface side it references are strained
+    # by literally the same code.
+    coherent = (
+        match is not None
+        and abs(float(np.linalg.det(sub_2d))) > 1e-9
+        and abs(float(np.linalg.det(film_2d))) > 1e-9
+    )
+    if coherent:
+        film_slab = _strain_film_onto(film_slab, sub_2d)
+    # Criterion C runs on the cells the stack will actually repeat, so
+    # after the film has been strained onto the substrate.
+    d_refs = (
+        _check_inplane_period("substrate", substrate_slab, max_strain),
+        _check_inplane_period("film", film_slab, max_strain),
+    )
+    return substrate_slab, film_slab, sub_2d, float(sub_mat[2, 2]), d_refs
+
+
 def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
     """Stack substrate and film slabs into one coherent interface.
 
@@ -880,39 +1132,22 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
 
     gap = 2.0
     vacuum = 10.0
+    max_strain = 0.05
     if config is not None:
         gap = float(getattr(config, "gap", gap))
         vacuum = float(getattr(config, "vacuum_thickness", vacuum))
+        max_strain = float(getattr(config, "max_strain", max_strain))
 
     if ANALYSIS_CHARGE not in substrate_slab.site_properties:
         substrate_slab = _prepare_charge_structure(substrate_slab)
     if ANALYSIS_CHARGE not in film_slab.site_properties:
         film_slab = _prepare_charge_structure(film_slab)
-    if match is not None:
-        substrate_slab = _scale_in_plane(substrate_slab, match.substrate_supercell)
-        film_slab = _scale_in_plane(film_slab, match.film_supercell)
 
-    sub_mat = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64)
-    film_mat = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
-    # In-plane block: exact, since ``_orient_slab`` guarantees a and b carry
-    # no z component and the vacuum column no in-plane one.
-    sub_2d = np.asarray(sub_mat[:2, :2], dtype=np.float64)
-    film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
-
+    substrate_slab, film_slab, sub_2d, sub_height, d_refs = _prepare_stack(
+        substrate_slab, film_slab, match, max_strain
+    )
     sub_coords = np.asarray(substrate_slab.cart_coords, dtype=np.float64).copy()
 
-    # Strain the film onto the substrate cell.  The shared helper keeps
-    # the fractional coordinates -- i.e. the stacking sequence -- intact
-    # and is the very same call ``reference_slabs`` performs, so a
-    # reference board and the interface side it references are strained
-    # by literally the same code.
-    coherent = (
-        match is not None
-        and abs(float(np.linalg.det(sub_2d))) > 1e-9
-        and abs(float(np.linalg.det(film_2d))) > 1e-9
-    )
-    if coherent:
-        film_slab = _strain_film_onto(film_slab, sub_2d)
     # In-plane cell the film ends up with: the substrate cell once it has
     # been strained onto it, its own cell in the legacy no-match stacking.
     # The z column of the cell carries nothing else either, so reading the
@@ -929,7 +1164,7 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         rows[2, 2] = float(c)
         return rows
 
-    sub_cell = _cell(sub_2d, sub_mat[2, 2] if sub_mat[2, 2] > 0 else 1.0)
+    sub_cell = _cell(sub_2d, sub_height if sub_height > 0 else 1.0)
 
     # Shift film so its bottom sits at substrate_top + gap.  z is the
     # surface normal for both boards, so these extents are real heights.
@@ -959,6 +1194,11 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         site_properties=site_properties,
     )
     _attach_charge_geometry(interface, substrate_slab, film_slab, vacuum)
+    # Advisory, and deliberately bounded by ``gap`` as well as by the bond
+    # scale: ``gap`` is a separation the caller asked for, so a pair at the
+    # join sitting at ``gap`` is a request being honoured, not a collision.
+    # Only a pair closer than the smaller of the two is worth reporting.
+    _warn_interface_proximity(interface, len(substrate_slab), d_refs, max_strain, gap)
     # Which in-plane cell each side actually occupies in the stack.  The
     # substrate is the reference and is never deformed; the film either
     # inherits that cell or, when nothing was strained, keeps its own --
@@ -1455,6 +1695,14 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
             _prepare_charge_structure(slab)
         try:
             interface = _assemble_interface(sub_slab, film_slab, match, self.config)
+        except GeometryGateError:
+            # A gate that is swallowed is not a gate.  Any other assembly
+            # problem is specific to one candidate and is worth dropping
+            # quietly; a geometry violation is a property of the *boards*,
+            # so every remaining candidate would fail the same way and the
+            # honest answer is to say so rather than to return nothing.
+            report["assembly_failed"] += 1
+            raise
         except Exception:  # noqa: BLE001
             report["assembly_failed"] += 1
             return None

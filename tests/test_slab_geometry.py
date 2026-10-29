@@ -14,6 +14,7 @@ and mirrors its own half-board, so it gets the same leveling.
 from __future__ import annotations
 
 import math
+import warnings
 from unittest.mock import patch
 
 import numpy as np
@@ -23,9 +24,13 @@ from atominterface.builders.charge import finite_slab_geometry, make_symmetric_s
 from atominterface.builders.coherent import (
     CoherentInterfaceBuilder,
     CoherentInterfaceConfig,
+    GeometryGateError,
+    _check_area_conservation,
+    _check_inplane_period,
     _flatten_terminations,
     _get_terminations,
     _make_slabs,
+    _shortest_inplane_period,
 )
 
 #: Tolerance (A) for "this cell component is zero".  Cell lengths are a few
@@ -42,23 +47,6 @@ ORIENTATIONS = (
     ((1, 1, 1), 1 / math.sqrt(3.0), math.sqrt(3.0) / 4.0, 7),  # 2.0871 A, 5.6587 A^2
     ((1, 1, 0), 1 / (2.0 * math.sqrt(2.0)), 1 / math.sqrt(2.0), 12),  # 1.2781 A, 9.2406 A^2
 )
-
-
-def _shortest_inplane_period(matrix: np.ndarray) -> float:
-    """Shortest ``|m*a + n*b|`` over ``m, n`` in ``[-4, 4]``.
-
-    Brute force rather than ``min(|a|, |b|)``: a reduced-but-not-minimal
-    basis (``((1, 1), (0, 2))``, say) can have both basis vectors longer
-    than a short combination of them, so taking ``|a|`` alone would read
-    too long a period and let a degenerate cell pass.
-    """
-    best = float("inf")
-    for m in range(-4, 5):
-        for n in range(-4, 5):
-            if m == 0 and n == 0:
-                continue
-            best = min(best, float(np.linalg.norm(m * matrix[0] + n * matrix[1])))
-    return best
 
 
 def _level_violation(matrix: np.ndarray) -> float:
@@ -458,7 +446,7 @@ def test_assembled_interface_keeps_the_orientations_geometry(
 
         # No board here is denser than an fcc nearest-neighbour shell: the
         # shortest lattice period bounds every in-plane atom separation.
-        assert _shortest_inplane_period(cell) >= NN_LIMIT - 1e-6
+        assert _shortest_inplane_period(cell)[0] >= NN_LIMIT - 1e-6
 
 
 def test_001_area_is_pinned_not_merely_consistent():
@@ -566,4 +554,183 @@ def test_symmetric_interface_candidates_carry_the_true_area():
         assert _level_violation(cell) < LEVEL_TOL
         expected = area_factor * 3.615**2 * candidate.metadata["substrate_supercell_multiplicity"]
         assert candidate.area == pytest.approx(expected, rel=1e-9)
-        assert _shortest_inplane_period(cell) >= NN_LIMIT - 1e-6
+        assert _shortest_inplane_period(cell)[0] >= NN_LIMIT - 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Geometry gate.  Criterion B (area conservation) and criterion C (in-plane
+# period) refuse the structure; criterion D (cross-interface proximity) only
+# warns, because a fresh join sits inside a bond length on purpose and has to
+# be allowed to relax apart.  The gate has no off switch: a geometry that
+# cannot be measured cannot be reported either.
+# ---------------------------------------------------------------------------
+
+
+def _rotate_out_of_level(slab):
+    """The same board, rigidly rotated until ``a`` and ``b`` are not level.
+
+    A rigid rotation leaves every interatomic distance alone -- so
+    criterion C's reference is untouched -- while ``[:2, :2]`` stops being
+    the interface plane and becomes its xy projection.  That is precisely
+    what a board that skipped ``_orient_slab`` looks like downstream.
+    """
+    from pymatgen.core import Lattice, Structure
+
+    target = np.array([1.0, 1.0, 1.0]) / math.sqrt(3.0)
+    axis = np.cross(np.array([0.0, 0.0, 1.0]), target)
+    sine = float(np.linalg.norm(axis))
+    cross_matrix = np.array(
+        [[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]]
+    )
+    rotation = (
+        np.eye(3) + cross_matrix + cross_matrix @ cross_matrix * ((1.0 - target[2]) / sine**2)
+    )
+    matrix = np.asarray(slab.lattice.matrix, dtype=float) @ rotation.T
+    return Structure(Lattice(matrix), [str(entry) for entry in slab.species], slab.frac_coords)
+
+
+@pytest.mark.parametrize("miller", [(0, 0, 1), (1, 1, 1), (1, 1, 0)], ids=["001", "111", "110"])
+def test_geometry_gate_accepts_every_orientation(miller):
+    """The gate must be silent on the three orientations the CLI exposes."""
+    config = CoherentInterfaceConfig(
+        substrate_miller=miller, film_miller=miller, relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates, "the gate rejected a healthy orientation"
+    assert [w for w in caught if "geometry gate" in str(w.message)] == []
+
+
+def test_area_conservation_gate_fires_when_the_board_is_not_levelled():
+    """Criterion B: a projected in-plane block spans less than the board."""
+    slab = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 14.4, 15.0))[0][1]
+    levelled = np.asarray(slab.lattice.matrix, dtype=float)
+
+    # The levelled board itself is exactly conservative.
+    _check_area_conservation("substrate", levelled, slab, None)
+
+    skewed = _rotate_out_of_level(slab)
+    with pytest.raises(GeometryGateError) as raised:
+        _check_area_conservation("substrate", levelled, skewed, None)
+
+    message = str(raised.value)
+    assert "criterion B" in message
+    assert "substrate side" in message
+    # measured / reference / threshold, all three named.
+    assert "measured in-plane block" in message
+    assert "reference" in message
+    assert "relative deviation" in message
+    assert "1.0e-06" in message
+
+
+def test_inplane_period_gate_also_fires_on_an_unlevelled_board():
+    """Criterion C catches the same board, on a different measurement.
+
+    B is an area, C a length: the projection that costs 42 % of the area
+    is the same one that halves the shortest in-plane period.
+    """
+    slab = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 14.4, 15.0))[0][1]
+    skewed = _rotate_out_of_level(slab)
+
+    with pytest.raises(GeometryGateError, match="criterion C"):
+        _check_inplane_period("substrate", skewed, 0.05)
+
+
+def test_inplane_period_gate_fires_for_an_area_preserving_squash():
+    """A shear that conserves area slips past B and is caught by C.
+
+    Halving ``a`` and doubling ``b`` leaves ``|a x b|`` untouched -- so
+    criterion B is satisfied -- but the board then repeats every 1.278 A
+    while its atoms still sit 2.556 A apart.
+    """
+    from pymatgen.core import Lattice, Structure
+
+    rows = np.array([[1.2780955, 0.0, 0.0], [0.0, 5.112382, 0.0], [0.0, 0.0, 20.0]])
+    squashed = Structure(
+        Lattice(rows),
+        ["Cu", "Cu"],
+        [[0.0, 0.0, 5.0], [0.0, 2.556191, 5.0]],
+        coords_are_cartesian=True,
+    )
+    _check_area_conservation("film", rows, squashed, None)
+
+    with pytest.raises(GeometryGateError) as raised:
+        _check_inplane_period("film", squashed, 0.05)
+
+    message = str(raised.value)
+    assert "criterion C" in message
+    assert "film side" in message
+    assert "threshold" in message
+    # Atom pair: indices, element symbols and fractional coordinates.
+    assert "#0 Cu" in message and "#1 Cu" in message
+    assert "u=" in message and "v=" in message and "w=" in message
+
+
+def test_inplane_period_search_finds_short_combinations_not_just_the_basis():
+    """``min(|a|, |b|)`` is not the period; the enumeration is.
+
+    With ``b = 3a + (0.05, 0.3)`` the basis vectors read 2.556 A and 7.68 A
+    while ``b - 3a`` repeats every 0.304 A.  A gate that took ``|a|`` would
+    call that cell healthy.
+    """
+    basis = np.array([[2.556191, 0.0], [3 * 2.556191 + 0.05, 0.3]])
+    period, m, n = _shortest_inplane_period(basis)
+    naive = min(float(np.linalg.norm(basis[0])), float(np.linalg.norm(basis[1])))
+
+    assert (m, n) not in ((1, 0), (0, 1))
+    assert period < naive / 4.0
+
+
+def test_gate_is_not_swallowed_when_orientation_is_short_circuited():
+    """Patching out ``_orient_slab`` must break the build, not degrade it.
+
+    Before the gate the same patch produced a silently smaller cell and 20
+    quiet candidates.  It has to raise now, and the failure has to survive
+    ``build_all``: a gate whose exception is counted and dropped is an off
+    switch under another name.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=(1, 1, 1), film_miller=(1, 1, 1), relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with (
+        patch("atominterface.builders.coherent._orient_slab", side_effect=lambda slab: slab),
+        pytest.raises(GeometryGateError, match="criterion B"),
+    ):
+        builder.build_all()
+
+    assert builder.last_build_report["assembly_failed"] == 1
+
+
+def test_interface_proximity_warns_with_fractional_coordinates_instead_of_raising():
+    """Criterion D: a join inside a bond is reported, never refused.
+
+    ``gap=0.5`` puts the two boards well inside the Cu/Ni bond length --
+    which is what a user handing the relaxer a compressed join asks for,
+    and why this one is advisory.  The message has to carry the fractional
+    coordinates, because the distance alone cannot say whether the pair
+    faces the join or sits inside one of the boards.
+    """
+    config = CoherentInterfaceConfig(gap=0.5, relax_terminations=False)
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build_all()
+
+    assert candidates, "an advisory proximity warning must not drop the candidate"
+    proximity = [w for w in caught if "criterion D" in str(w.message)]
+    assert proximity, "a join inside a bond length went unreported"
+
+    message = str(proximity[0].message)
+    assert "u=" in message and "v=" in message and "w=" in message
+    assert "#" in message
+    assert "Cu" in message and "Ni" in message
