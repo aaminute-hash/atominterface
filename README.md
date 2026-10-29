@@ -193,6 +193,7 @@ Physical invariance tests are first-class:
 | Something failed, or a result looks wrong | [`docs/troubleshooting.md`](docs/troubleshooting.md) |
 | How were these numbers validated? | [`docs/validation_cu_ni_001.md`](docs/validation_cu_ni_001.md) |
 | Raw data to reproduce it myself | [`docs/validation/cu_ni_001_multi_candidate/`](docs/validation/cu_ni_001_multi_candidate/) |
+| Raw data for the (111) and (110) orientations | [`docs/validation/cu_ni_multi_orientation/`](docs/validation/cu_ni_multi_orientation/) |
 | Contributing (read the testing rule before you write a mock) | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
 One caveat worth repeating: **γ_int from the shipped defaults is biased by about
