@@ -753,6 +753,8 @@ def _fake_args(**overrides) -> argparse.Namespace:
         "fmax": 0.01,
         "max_steps": 200,
         "outdir": "outputs/energy_cu_ni",
+        "sub_miller": [0, 0, 1],
+        "film_miller": [0, 0, 1],
     }
     values.update(overrides)
     return argparse.Namespace(**values)

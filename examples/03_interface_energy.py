@@ -57,6 +57,7 @@ Run:
     python examples/03_interface_energy.py --backend mace --device cpu
     python examples/03_interface_energy.py --backend mace --dtype float64 --fmax 0.01
     python examples/03_interface_energy.py --min-thickness-substrate 18.0 --min-thickness-film 14.4
+    python examples/03_interface_energy.py --sub-miller 1 1 1 --film-miller 1 1 1
 
 Fail-closed demonstration (non-zero exit, empty gamma cells):
     python examples/03_interface_energy.py --backend dummy --max-steps 1 --fmax 1e-6
@@ -373,6 +374,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--vacuum", type=float, default=15.0, help="vacuum padding in A.")
     parser.add_argument("--max-candidates", type=int, default=1, help="keep at most N candidates.")
     parser.add_argument(
+        "--sub-miller",
+        type=int,
+        nargs=3,
+        metavar=("H", "K", "L"),
+        default=SUBSTRATE_MILLER,
+        help=(
+            "Miller indices of the substrate surface, as three integers. "
+            "Default %(default)s, the documented Cu(001) reference; "
+            "'--sub-miller 1 1 1' switches the substrate side to (111)."
+        ),
+    )
+    parser.add_argument(
+        "--film-miller",
+        type=int,
+        nargs=3,
+        metavar=("H", "K", "L"),
+        default=FILM_MILLER,
+        help=(
+            "Miller indices of the film surface, as three integers. "
+            "Default %(default)s, the documented Ni(001) reference."
+        ),
+    )
+    parser.add_argument(
         "--fmax",
         type=float,
         default=0.01,
@@ -581,8 +605,8 @@ def _build_candidates(substrate, film, args: argparse.Namespace):
     from atominterface.builders import CoherentInterfaceBuilder, CoherentInterfaceConfig
 
     config = CoherentInterfaceConfig(
-        substrate_miller=SUBSTRATE_MILLER,
-        film_miller=FILM_MILLER,
+        substrate_miller=tuple(args.sub_miller),
+        film_miller=tuple(args.film_miller),
         max_area=MAX_AREA,
         gap=GAP,
         min_thickness=args.min_thickness,
