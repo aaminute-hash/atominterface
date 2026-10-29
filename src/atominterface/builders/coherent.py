@@ -75,6 +75,13 @@ __all__ = [
 # when ranking lattice matches; see ``_match_lattices``.
 _STRAIN_TIE_DIGITS = 4
 
+# Absolute tolerance (Å) below which a cell component counts as nothing
+# when deciding whether a slab already satisfies the "+z normal" contract
+# enforced by :func:`_orient_slab`.  Cell lengths are a few Å, so this is
+# ~1e-10 relative -- far above float64 round-off, far below any physical
+# or numerical quantity downstream.
+_ORIENT_TOL = 1e-9
+
 
 @dataclass(frozen=True)
 class CoherentInterfaceConfig(BuilderConfig):
@@ -396,6 +403,65 @@ def _prepare_charge_structure(structure, charges=None, oxidation_states=None):
     return prepared
 
 
+def _orient_slab(slab):
+    """Return a slab whose surface normal is exactly ``+z``, ``a``/``b`` in ``xy``.
+
+    ``SlabGenerator(primitive=True)`` returns cells whose in-plane vectors
+    carry a z component for every surface but (001): fcc (111) comes back
+    as ``a = (1.81, 0, -1.81)``, ``b = (0, 1.81, -1.81)``.  Every
+    downstream ``[:2]`` slice then projects those vectors onto the xy
+    plane, which silently shrinks the interface area by ``sqrt(3)``
+    (3.2671 instead of 5.6587 Å²) and lets ``_assemble_interface`` rebuild
+    a hexagonal cell as a square one.  Rotating once here turns that
+    assumption into a fact for every consumer further down the chain
+    instead of patching six separate slices.
+
+    The rotation is applied to the orthogonal-c form so that ``c`` really
+    is parallel to ``cross(a, b)`` -- clearing the in-plane part of a skew
+    ``c`` would otherwise discard ~40 Å of real cell vector.
+
+    A slab that already satisfies the contract is handed back unchanged
+    and **bit-identical**, which is what keeps the published (001)
+    reference numbers pinned.
+    """
+    from pymatgen.core import Structure
+    from pymatgen.core.lattice import Lattice as _Lattice
+
+    matrix = np.asarray(slab.lattice.matrix, dtype=np.float64)
+    already_aligned = max(
+        abs(float(matrix[0, 2])),
+        abs(float(matrix[1, 2])),
+        abs(float(matrix[2, 0])),
+        abs(float(matrix[2, 1])),
+    )
+    if already_aligned <= _ORIENT_TOL:
+        return slab
+
+    orth = slab.get_orthogonal_c_slab()  # c perpendicular to a, b
+    L = np.asarray(orth.lattice.matrix, dtype=np.float64)
+    n = np.cross(L[0], L[1])
+    n = n / np.linalg.norm(n)
+    if n[2] < 0:
+        n = -n
+    e1 = L[0] / np.linalg.norm(L[0])
+    e2 = np.cross(n, e1)
+    e2 = e2 / np.linalg.norm(e2)
+    rot = np.vstack([e1, e2, n])  # rows are the new basis vectors, in old coordinates
+    new_L = L @ rot.T
+    new_L[2, :2] = 0.0  # defensive: drop any residual in-plane part of c
+    coords = np.asarray(orth.cart_coords, dtype=np.float64) @ rot.T
+    out = Structure(
+        _Lattice(new_L),
+        list(orth.species),
+        coords,
+        coords_are_cartesian=True,
+        to_unit_cell=False,
+        site_properties={key: list(values) for key, values in orth.site_properties.items()},
+    )
+    out.properties.update(getattr(orth, "properties", {}) or {})
+    return out
+
+
 def _get_terminations(structure, miller, min_thickness, vacuum_thickness):
     """Return numbered slabs for one surface.
 
@@ -421,9 +487,10 @@ def _get_terminations(structure, miller, min_thickness, vacuum_thickness):
         raise ValueError(f"slab generation failed for Miller indices {miller}: {exc}") from exc
 
     out = []
-    for idx, slab in enumerate(slabs):
-        if slab is None:
+    for idx, generated in enumerate(slabs):
+        if generated is None:
             continue
+        slab = _orient_slab(generated)
         slab.properties["ai_slab_generated"] = True
         slab.properties["charge_overridden_sources"] = structure.properties.get(
             "charge_overridden_sources", []
@@ -609,8 +676,12 @@ def _match_lattices(
         max_angle_tol=math.radians(config.zsl_max_angle),
     )
 
-    sub_cell_area = abs(float(np.linalg.det(sub_vecs[:, :2])))
-    film_cell_area = abs(float(np.linalg.det(film_vecs[:, :2])))
+    # True parallelogram area |a x b|.  Using the norm of the cross product
+    # rather than the 2x2 determinant keeps the result independent of how
+    # the cell is rotated: the determinant implicitly projects a, b onto xy
+    # and under-reports any cell whose in-plane vectors are not level.
+    sub_cell_area = float(np.linalg.norm(np.cross(sub_vecs[0], sub_vecs[1])))
+    film_cell_area = float(np.linalg.norm(np.cross(film_vecs[0], film_vecs[1])))
 
     matches: list[_MatchInfo] = []
     try:
@@ -716,8 +787,9 @@ def _fallback_matches(
     sub_vecs = np.array(sub_lat.matrix[:2], dtype=np.float64)
     film_vecs = np.array(film_lat.matrix[:2], dtype=np.float64)
 
-    film_area = float(abs(np.linalg.det(film_vecs[:, :2])))
-    sub_cell_area = float(abs(np.linalg.det(sub_vecs[:, :2])))
+    # True area |a x b|, not the 2x2 determinant -- see ``_match_lattices``.
+    film_area = float(np.linalg.norm(np.cross(film_vecs[0], film_vecs[1])))
+    sub_cell_area = float(np.linalg.norm(np.cross(sub_vecs[0], sub_vecs[1])))
     if film_area <= 0:
         return []
 
@@ -809,6 +881,9 @@ def _strain_film_onto(film_slab, substrate_slab_2d):
     from pymatgen.core.lattice import Lattice as _Lattice
 
     film_mat = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
+    # ``[:2, :2]`` is the true in-plane block because the z components of a
+    # and b are zero -- guaranteed by ``_orient_slab`` for every slab that
+    # comes out of :func:`_get_terminations`.
     film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
     sub_2d = np.asarray(substrate_slab_2d, dtype=np.float64)
 
@@ -884,6 +959,8 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
 
     sub_mat = np.asarray(substrate_slab.lattice.matrix, dtype=np.float64)
     film_mat = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
+    # In-plane block: exact, since ``_orient_slab`` guarantees a and b carry
+    # no z component and the vacuum column no in-plane one.
     sub_2d = np.asarray(sub_mat[:2, :2], dtype=np.float64)
     film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
 
@@ -903,6 +980,9 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         film_slab = _strain_film_onto(film_slab, sub_2d)
     # In-plane cell the film ends up with: the substrate cell once it has
     # been strained onto it, its own cell in the legacy no-match stacking.
+    # The z column of the cell carries nothing else either, so reading the
+    # normal direction off ``cart_coords[:, 2]`` below is legitimate: both
+    # slabs were leveled by ``_orient_slab``.
     film_in_plane = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
     film_coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
 
@@ -916,7 +996,8 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
 
     sub_cell = _cell(sub_2d, sub_mat[2, 2] if sub_mat[2, 2] > 0 else 1.0)
 
-    # Shift film so its bottom sits at substrate_top + gap.
+    # Shift film so its bottom sits at substrate_top + gap.  z is the
+    # surface normal for both boards, so these extents are real heights.
     sub_top = float(np.max(sub_coords[:, 2])) if len(sub_coords) else 0.0
     film_bottom = float(np.min(film_coords[:, 2])) if len(film_coords) else 0.0
     z_shift = sub_top + gap - film_bottom
@@ -1237,6 +1318,8 @@ def reference_slabs(
     if match is not None:
         sub_slab = _scale_in_plane(sub_slab, match.substrate_supercell)
         film_slab = _scale_in_plane(film_slab, match.film_supercell)
+        # Same exact in-plane block as ``_assemble_interface`` reads: a and
+        # b are level and the vacuum column carries no in-plane part.
         sub_2d = np.asarray(sub_slab.lattice.matrix, dtype=np.float64)[:2, :2]
         film_2d = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
         if abs(float(np.linalg.det(sub_2d))) > 1e-9 and abs(float(np.linalg.det(film_2d))) > 1e-9:

@@ -3,10 +3,11 @@
 These tests pin the contract the builders rely on: a generated slab is a
 finite board whose atomic planes are spaced by the theoretical
 interplanar distance ``d_hkl`` of its Miller indices, with real vacuum
-above the top plane.  pymatgen re-orients the cell so the surface normal
-is ``cross(a1, a2)`` -- for anything but (001) that is *not* the
-cartesian z axis, so every measurement here projects onto the true
-normal.
+above the top plane.  pymatgen hands back cells whose in-plane vectors
+carry a z component for every surface but (001), so :func:`_orient_slab`
+rotates them level first -- after which ``cross(a1, a2)`` *is* the
+cartesian z axis and the plain ``[:2]`` slices the builders live by are
+exact rather than a silent projection.
 """
 
 from __future__ import annotations
@@ -25,6 +26,50 @@ from atominterface.builders.coherent import (
     _get_terminations,
     _make_slabs,
 )
+
+#: Tolerance (A) for "this cell component is zero".  Cell lengths are a few
+#: A, so this is ~1e-10 relative -- far above float64 round-off, far below
+#: any distance the builders care about.
+LEVEL_TOL = 1e-9
+
+#: (miller, interplanar spacing / a, in-plane area / a^2, Cu layers per 14.4 A).
+#: Areas are written analytically rather than as the 4-dp table values
+#: (6.5341 / 5.6587 / 9.2406): comparing against the rounded literal at a
+#: tight relative tolerance is a tautology, not a gate.
+ORIENTATIONS = (
+    ((0, 0, 1), 1 / 2.0, 1 / 2.0, 8),  # a/2 = 1.8075 A, a^2/2 = 6.5341 A^2
+    ((1, 1, 1), 1 / math.sqrt(3.0), math.sqrt(3.0) / 4.0, 7),  # 2.0871 A, 5.6587 A^2
+    ((1, 1, 0), 1 / (2.0 * math.sqrt(2.0)), 1 / math.sqrt(2.0), 12),  # 1.2781 A, 9.2406 A^2
+)
+
+
+def _shortest_inplane_period(matrix: np.ndarray) -> float:
+    """Shortest ``|m*a + n*b|`` over ``m, n`` in ``[-4, 4]``.
+
+    Brute force rather than ``min(|a|, |b|)``: a reduced-but-not-minimal
+    basis (``((1, 1), (0, 2))``, say) can have both basis vectors longer
+    than a short combination of them, so taking ``|a|`` alone would read
+    too long a period and let a degenerate cell pass.
+    """
+    best = float("inf")
+    for m in range(-4, 5):
+        for n in range(-4, 5):
+            if m == 0 and n == 0:
+                continue
+            best = min(best, float(np.linalg.norm(m * matrix[0] + n * matrix[1])))
+    return best
+
+
+def _level_violation(matrix: np.ndarray) -> float:
+    """Largest in-plane part of ``c`` / out-of-plane part of ``a`` or ``b``."""
+    return float(
+        max(
+            abs(matrix[0][2]),
+            abs(matrix[1][2]),
+            abs(matrix[2][0]),
+            abs(matrix[2][1]),
+        )
+    )
 
 
 def _fcc(species: str, a: float):
@@ -97,14 +142,17 @@ def test_generated_slab_carries_real_vacuum_above_the_top_plane(species, a):
     assert geometry["vacuum_reference"] is not None
 
 
-def test_111_slab_spacing_uses_the_oriented_normal_not_cartesian_z():
-    """A skewed (111) cell must be measured along ``cross(a1, a2)``.
+def test_slabs_are_level_so_cartesian_z_is_the_surface_normal():
+    """Every generated slab comes back with ``cross(a, b)`` along ``+z``.
 
-    pymatgen re-orients the cell so the surface normal is the cross
-    product of the in-plane vectors; for fcc (111) that axis is 54.7
-    degrees away from cartesian z.  Sorting by z reports the in-plane
-    lattice constant (3.615 A) instead of the interplanar spacing
-    (a/sqrt(3) = 2.087 A).
+    Before :func:`_orient_slab` re-levels the board, an fcc (111) slab was
+    handed back as ``a = (1.81, 0, -1.81)`` -- the normals sat at 54.7
+    degrees to cartesian z, so slicing ``[:2]`` projected the in-plane
+    vectors onto xy (area 3.2671 instead of 5.6587) and reading heights
+    off ``cart_coords[:, 2]`` reported the in-plane lattice constant
+    (3.615 A) instead of the interplanar spacing (2.087 A).  Every
+    measurement below is done the naive cartesian way on purpose: after
+    the re-leveling those have to agree with the true d_hkl.
     """
     terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 8.0, 15.0))
     slab = terms[0][1]
@@ -112,13 +160,11 @@ def test_111_slab_spacing_uses_the_oriented_normal_not_cartesian_z():
     matrix = np.asarray(slab.lattice.matrix, dtype=float)
     normal = np.cross(matrix[0], matrix[1])
     normal = normal / np.linalg.norm(normal)
-    assert not np.allclose(np.abs(normal), [0.0, 0.0, 1.0], atol=1e-6)
+    assert np.allclose(np.abs(normal), [0.0, 0.0, 1.0], atol=1e-9)
 
+    # The naive z ordering now measures the interplanar spacing.
     cartesian_z = np.asarray(slab.cart_coords, dtype=float)[:, 2]
-    assert np.allclose(np.diff(_plane_levels(slab)), 3.615 / np.sqrt(3.0), atol=1e-3)
-    # The naive z ordering is measurably different -- that is the bug the
-    # projection guards against.
-    assert not np.allclose(
+    assert np.allclose(
         np.diff(np.unique(np.round(cartesian_z, 4))), 3.615 / np.sqrt(3.0), atol=1e-3
     )
 
@@ -310,3 +356,142 @@ def test_per_side_thickness_none_or_positive_passes_validation():
     assert not CoherentInterfaceConfig(
         min_thickness_substrate=3.0, min_thickness_film=9.0
     ).validate()
+
+
+# ---------------------------------------------------------------------------
+# Orientation gates.  Everything below asserts the contract ``_orient_slab``
+# establishes: an oriented slab's normal is exactly +z, so the ``[:2]`` slices
+# every builder makes are exact rather than a projection onto xy.
+# ---------------------------------------------------------------------------
+
+MIN_THICKNESS = 14.4
+#: fcc Cu nearest-neighbour distance, a/sqrt(2) = 2.556191 A -- the 2.5562 in
+#: the acceptance note is this rounded to 4 dp.
+NN_LIMIT = 3.615 / math.sqrt(2.0)
+
+
+@pytest.mark.parametrize(
+    ("miller", "spacing_factor", "area_factor", "expect_layers"),
+    ORIENTATIONS,
+    ids=["001", "111", "110"],
+)
+def test_generated_slab_is_level_along_z(miller, spacing_factor, area_factor, expect_layers):
+    """``cross(a, b)`` must be the cartesian z axis, whatever the surface.
+
+    This is the invariant the rest of the builder chain is built on: the
+    in-plane vectors carry no z component and the vacuum column carries no
+    in-plane part, so ``lattice[:2, :2]`` is the truth and reading heights
+    off ``cart_coords[:, 2]`` is legitimate.
+    """
+    terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), miller, MIN_THICKNESS, 15.0))
+    slab = terms[0][1]
+    matrix = np.asarray(slab.lattice.matrix, dtype=float)
+
+    assert _level_violation(matrix) < LEVEL_TOL
+    normal = np.cross(matrix[0], matrix[1])
+    normal = normal / np.linalg.norm(normal)
+    assert np.allclose(normal, [0.0, 0.0, 1.0], atol=LEVEL_TOL)
+
+
+@pytest.mark.parametrize(
+    ("miller", "spacing_factor", "area_factor", "expect_layers"),
+    ORIENTATIONS,
+    ids=["001", "111", "110"],
+)
+def test_inplane_area_and_spacing_match_the_orientation(
+    miller, spacing_factor, area_factor, expect_layers
+):
+    """True area ``|a x b|`` and true layer spacing ``d_hkl``, per surface.
+
+    The expected values are the textbook fcc ones: the (111) board has
+    ``sqrt(3)/4 a^2 = 5.6587 A^2`` of interface and planes every
+    ``a/sqrt(3) = 2.0871 A`` -- the numbers the projected cell reported as
+    3.2671 A^2 and 3.615 A.
+    """
+    terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), miller, MIN_THICKNESS, 15.0))
+    slab = terms[0][1]
+    matrix = np.asarray(slab.lattice.matrix, dtype=float)
+
+    area = float(np.linalg.norm(np.cross(matrix[0], matrix[1])))
+    assert area == pytest.approx(area_factor * 3.615**2, rel=1e-9)
+
+    levels = np.unique(np.round(np.asarray(slab.cart_coords, dtype=float)[:, 2], 4))
+    gaps = np.diff(levels)
+    assert len(levels) == expect_layers
+    assert np.allclose(gaps, spacing_factor * 3.615, atol=1e-3)
+
+
+@pytest.mark.parametrize(
+    ("miller", "spacing_factor", "area_factor", "expect_layers"),
+    ORIENTATIONS,
+    ids=["001", "111", "110"],
+)
+def test_assembled_interface_keeps_the_orientations_geometry(
+    miller, spacing_factor, area_factor, expect_layers
+):
+    """End to end: the candidate the builder ships carries the same numbers.
+
+    A degraded rebuild would show up here rather than only in the raw
+    slab, because it is ``_assemble_interface`` that re-lays the cell from
+    the in-plane block and pads the vacuum from a z coordinate.
+    """
+    config = CoherentInterfaceConfig(
+        substrate_miller=miller, film_miller=miller, relax_terminations=False
+    )
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    candidates = builder.build_all()
+    assert candidates
+
+    for candidate in candidates[:2]:
+        cell = np.asarray(candidate.atoms.cell.array, dtype=float)
+        assert _level_violation(cell) < LEVEL_TOL
+
+        area = float(np.linalg.norm(np.cross(cell[0], cell[1])))
+        expected_area = (
+            area_factor * 3.615**2 * candidate.metadata["substrate_supercell_multiplicity"]
+        )
+        assert area == pytest.approx(expected_area, rel=1e-9)
+        assert candidate.area == pytest.approx(area, rel=1e-9)
+
+        # No board here is denser than an fcc nearest-neighbour shell: the
+        # shortest lattice period bounds every in-plane atom separation.
+        assert _shortest_inplane_period(cell) >= NN_LIMIT - 1e-6
+
+
+def test_001_area_is_pinned_not_merely_consistent():
+    """Regression lock: the published gamma values are normalised by 6.5341 A^2.
+
+    The area is asserted at its full precision (6.5341125 A^2, i.e.
+    ``a^2/2``) rather than against the rounded 6.5341, because a relative
+    tolerance of 1e-12 against the rounded literal could not be met even
+    before the re-orientation -- it would be a tautology, not a gate.
+    Any drift here moves gamma_Cu, gamma_Ni and gamma_int together.
+    """
+    config = CoherentInterfaceConfig(substrate_miller=(0, 0, 1), film_miller=(0, 0, 1))
+    builder = CoherentInterfaceBuilder(
+        substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
+    )
+    candidates = builder.build_all()
+    assert candidates
+
+    candidate = candidates[0]
+    assert candidate.metadata["substrate_supercell"] == ((1, 0), (0, 1))
+    assert candidate.area == pytest.approx(6.534112500000001, rel=1e-12)
+    cell = np.asarray(candidate.atoms.cell.array, dtype=float)
+    assert float(np.linalg.norm(np.cross(cell[0], cell[1]))) == pytest.approx(
+        6.534112500000001, rel=1e-12
+    )
+
+
+def test_oriented_slab_keeps_the_finite_slab_provenance():
+    """Re-orienting must not strip the properties the charge layer reads."""
+    terms = _flatten_terminations(_get_terminations(_fcc("Cu", 3.615), (1, 1, 1), 8.0, 15.0))
+    slab = terms[0][1]
+
+    assert slab.properties.get("ai_slab_generated") is True
+    geometry = finite_slab_geometry(slab)
+    assert geometry["finite_slab"] is True
+    assert geometry["vacuum_reference"] is not None
+    assert set(slab.site_properties) >= {"bulk_equivalent", "bulk_wyckoff"}
