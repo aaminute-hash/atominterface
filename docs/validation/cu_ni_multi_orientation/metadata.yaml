@@ -1,0 +1,127 @@
+# Cu/Ni 非 (001) 取向验证：(111) 与 (110)
+# 机器可读归档元数据。四条限定见 caveats，引用本目录任何数值前必读。
+
+archive: cu_ni_multi_orientation
+title: Cu/Ni(111) 与 Cu/Ni(110) 界面形成能验证（非 (001) 取向）
+status: 定稿（γ_int 由显式注册扫描定稿）；无 DFT 交叉验证，全部数值待独立复核
+archived: 2026-10-30
+
+tool: atominterface
+version: 0.3.0
+backend: mace
+backend_version: 0.3.17
+model_hash: MACE-MP-0/medium@mace-torch:0.3.17:sha256:01bfe2210013
+dtype: float32
+device: cpu
+seed: 0
+
+worktree:
+  primary: F:/tmp/wt-111b
+  branch: fix/non-001-slab-geometry
+  head: c440b81
+  head_subject: 'fix(examples): strain the coherent bulk reference on the (hkl) plane'
+  pinned_for_gap_probe: F:/tmp/wt-111c
+  pinned_note: detached HEAD @ c440b81；入口无关性测量在此钉死的工作树上完成
+  pythonpath: PYTHONPATH=F:/tmp/wt-111b/src
+  pythonpath_note: venv 里 editable 安装指向旧位置，必须显式指定 PYTHONPATH
+
+env:
+  python: 3.13.14
+  platform: Windows-11-10.0.26340-SP0
+  torch: 2.14.1+cpu
+  ase: 3.29.0
+  mace-torch: 0.3.17
+  pymatgen: unknown
+  pymatgen_note: provenance 未抓到版本号，实际 2026.10.24（见 (001) 归档 environment.lock.yml）
+
+protocol:
+  entry_point: examples/03_interface_energy.py
+  reference_state: strained-coherent
+  area_source: candidate.area
+  vacuum_A: 15.0
+  gap_initial_A: 2.0
+  gap_initial_A_note: gap_probe.csv 另有 2.4 档用于入口无关性对照
+  fmax: 0.002
+  fmax_note: eV/Å；fmax 对照实验另有 0.01 档，见 README §6
+  max_steps_thickness_scan: 400
+  max_steps_registry_scan: 900
+  max_steps_gap_probe: 900
+  max_candidates: 1
+  max_candidates_note: (001) fmax 对照为 10 候选（published 协议）
+  relaxation: 完整松弛，无预松弛（(110) 教训：预松弛会掩盖注册锁定）
+  in_plane_strain: stretch 0.025823、shear 0，与 (001) 逐位相同
+
+artifacts:
+  registry_scan.csv: 7e48f5c215784545516922169490589b85b6da0af6d227f6f27b4ddf004e5546
+  registry_vs_thickness.csv: 3d9b333e10e21a43f054e29ab4c046df3ceff87e58f4b1b8c24804abc24eaacd
+  gap_probe.csv: bf1f1ff19e970a14c5112fd982a7e80fa4fcade236cbbc80866746d6f0e80011
+
+caveats:
+  - id: no-dft-crosscheck
+    text: >
+      (001) 有 SCNET 提供的 23 个 VASP 单点对照；(111)/(110) 只有 MACE-MP-0 一个数。
+      本目录数值不得与文献值并列成对照，只能标注待独立复核。
+  - id: stationary-point-artefacts
+    text: >
+      0.898 J/m²（(111)@14.4 Å on-top）与 0.5953 J/m²（(110) 脊位）不是数值，
+      是对称性锁定的驻点假象。它们出现在文档与 CSV 中仅作为失效模式示例，
+      标注为不可引用，不得当作界面能使用。
+  - id: dz-two-conventions
+    text: >
+      dz 有两个口径：layer_dz（底层 Ni 层平均 z 减顶层 Cu 层平均 z）与
+      pair_dz（最近 Cu-Ni 原子对的 z 差）。(110) 槽位两者分别为 1.2306 Å 与
+      2.4460 Å，相差一倍多；(111) 上两者相同。混用会得出错误结论。
+      源文件存在列命名冲突：registry_scan_110.csv 的 dz_post_A 是 pair_dz，
+      gap_probe.json 的 dz_post_A 是 layer_dz。
+  - id: fmax-scoped-to-001
+    text: >
+      差 = γ(fmax=0.01) − γ(fmax=0.002)，读作默认批次相对收敛值偏高多少，
+      全项目统一此方向。该差约 +0.0050 J/m²（默认批次相对收敛值）只属于 (001) 的 A 簇（18/36 原子）；
+      (111) 在可比原子数（18）下实测仅 1e-4 J/m²，且符号相反，差约 50 倍。
+      不得写成 γ_int 的普遍性质。
+
+derived_columns:
+  registry_vs_thickness.csv.ratio_pct: >
+    源 candidates.csv 无该列，由本文件内 4 位小数的 γ 值重算。
+    末位可能与报告正文表格相差 1（例如 (111)@21.6 本文件 2.597、报告 2.596）。
+  gap_probe.csv.layer_dz_post_A: 来自源 JSON 的 dz_post_A
+  gap_probe.csv.pair_dz_post_A: 来自源 JSON 的 CuNi_pair_dz_A
+  registry_scan.csv.orientation: >
+    合并时新增；两取向源 CSV 的列集合不同，某取向缺失的列留空，不做填充。
+
+known_issues:
+  - id: registry_unchanged_false_negative
+    text: >
+      registry_scan.csv 的 registry_unchanged 列在 (111)@21.6 的 fcc-hollow 与
+      hcp-hollow 两行为 False，是假阴性。脚本用 np.abs(post_r - pre_r) < 0.01
+      比较分数坐标，未做整格回绕，而这两行的 post 恰为 pre 加减 1.0（同一物理位点）。
+      判定是否离开初态应以 lateral_pre_A 与 lateral_post_A 是否相等（两行均为
+      1.4758 Å）以及 Δsite = 0.0000 Å 为准。
+  - id: lateral_110_rounding
+    text: >
+      (110) 槽位横向偏移：gap_probe.json 实测 2.2137 Å；registry_scan_110.py
+      文件头位点表与结果报告 §10.7 记 2.2136 Å（截断所致）。本目录取 JSON 实测值。
+  - id: gamma_Ni_110_thickness_dependence
+    text: >
+      γ_Ni(110) 随厚度有微小变化：10.8 档 2.1209、14.4 档 2.1191、18.0 与 21.6 档
+      2.1192 J/m²。汇总表写 2.1192（厚板平台值）；精确值见 registry_vs_thickness.csv。
+  - id: fmax_sign_convention
+    text: >
+      全项目统一：差 = γ(fmax=0.01) − γ(fmax=0.002)，读作默认批次相对收敛值
+      偏高多少；与 docs/validation_cu_ni_001.md 第 323/349/351 行一致。
+      但该文档 §7 用了收紧方向（A −0.0050、C −0.0006），与上述三处方向相反，
+      属已发布文档的内部不一致，待单独修正；在此之前引用该文档的 fmax 相关
+      表述须先确认方向。本目录表格在括号内同时给出端点（默认 → 收敛），
+      以免符号被读反。
+
+provenance:
+  source_dir: F:/tmp/d1_111_fixed
+  result_report: F:/tmp/d1_111_fixed/README.md（§10、§11、§12、§13）
+  scripts:
+    registry_scan_111.py: (111) 注册扫描（位点由初态实测反推）
+    registry_scan_110.py: (110) 注册扫描（偏移量表在文件头）
+    gap_probe.py: 入口无关性探针（运行时覆盖 GAP，不改源码）
+    asbuilt_map.py: (111) 各厚度 builder 初态注册映射（dummy 后端，无能量）
+    stacking_check.py: (111) ABC 堆垛与注册判定
+    agg_orient.py: 三取向聚合（脚本生成，无手抄）
+  note: 未修改任何 src，未提交，未推送；scripts 未随本目录归档，见 reproduce.md 的复现步骤

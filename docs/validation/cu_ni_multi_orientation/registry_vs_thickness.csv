@@ -1,0 +1,9 @@
+orientation,min_thickness_A,n_layers_Cu,n_layers_Ni,n_atoms,offset_u_asbuilt,offset_v_asbuilt,lateral_asbuilt_A,registry_asbuilt,registry_final,gamma_Cu_J_m2,gamma_Ni_J_m2,gamma_int_J_m2,ratio_pct,source
+(111),10.8,6,6,12,0.3333,0.3333,1.4758,fcc-hollow,fcc-hollow,1.2994,1.8258,0.0818,2.617,asbuilt_map/asbuilt_111.json + thickscan_fixed/t10_8/candidates.csv
+(111),14.4,7,8,15,-0.0,-0.0,0.0,on-top,on-top,1.2994,1.8237,0.8981,28.757,asbuilt_map/asbuilt_111.json + thickscan_fixed/t14_4/candidates.csv
+(111),18.0,9,9,18,0.3333,0.3333,1.4758,fcc-hollow,fcc-hollow,1.2994,1.8237,0.0812,2.600,asbuilt_map/asbuilt_111.json + thickscan_fixed/t18_0/candidates.csv
+(111),21.6,11,11,22,0.6667,-0.3333,1.4758,hcp-hollow,hcp-hollow,1.2993,1.8237,0.0811,2.597,asbuilt_map/asbuilt_111.json + thickscan_fixed/t21_6/candidates.csv
+(110),10.8000,10,10,20,0.5,-0.0,1.8075,ridge,ridge(as-built),1.5684,2.1209,0.5954,16.139,orient_110/t10_8/candidates.csv + gap_probe/110_trough_gap2.0_t14_4.json
+(110),14.4000,12,12,24,0.5,-0.0,1.8075,ridge,ridge(as-built),1.5684,2.1191,0.5952,16.141,orient_110/t14_4/candidates.csv + gap_probe/110_trough_gap2.0_t14_4.json
+(110),18.0000,16,16,32,0.5,-0.0,1.8075,ridge,ridge(as-built),1.5684,2.1192,0.5953,16.143,orient_110/t18_0/candidates.csv + gap_probe/110_trough_gap2.0_t14_4.json
+(110),21.6000,18,18,36,0.5,-0.0,1.8075,ridge,trough(fcc-cont) [slid from ridge during relaxation],1.5684,2.1192,0.0939,2.546,orient_110/t21_6/candidates.csv + gap_probe/110_trough_gap2.0_t14_4.json
