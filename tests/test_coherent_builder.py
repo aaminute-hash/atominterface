@@ -935,6 +935,37 @@ def _unexpected_warnings(caught):
     ]
 
 
+def test_geometry_gate_warning_filtered_above_is_asserted_here():
+    """The warning the helper above filters out, asserted positively.
+
+    Filtering a warning out of an assertion is only safe while something
+    else insists it still fires -- otherwise a future change to the
+    threshold makes it vanish silently and the filter keeps looking
+    green.  On-top NaCl(111) stacking puts the join at exactly the
+    requested 2.0 A gap, inside the 2.82 A NaCl bond, so criterion D has
+    to speak up.
+    """
+    builder = _polar_builder(symmetric_slabs=False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build()
+
+    assert candidates
+    proximity = [w for w in caught if "criterion D" in str(w.message)]
+    assert proximity, "on-top stacking at the default gap went unreported"
+
+    message = str(proximity[0].message)
+    # Same elements every gate message carries.
+    assert "criterion D" in message
+    assert "contact scale" in message
+    assert "u=" in message and "v=" in message and "w=" in message
+    # ...and the one that makes this pair interesting: it is directly
+    # opposed, i.e. a candidate symmetry-locked registry rather than a
+    # merely tight gap.
+    assert "lateral offset = 0.000000 A" in message
+    assert "on-top" in message.lower()
+
+
 def test_build_symmetric_true_transforms_and_marks_candidates():
     builder = _polar_builder(symmetric_slabs=True)
     with warnings.catch_warnings(record=True) as caught:

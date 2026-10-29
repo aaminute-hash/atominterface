@@ -717,6 +717,12 @@ def test_interface_proximity_warns_with_fractional_coordinates_instead_of_raisin
     and why this one is advisory.  The message has to carry the fractional
     coordinates, because the distance alone cannot say whether the pair
     faces the join or sits inside one of the boards.
+
+    This pair is laterally displaced by half a surface vector, so the
+    on-top clause must stay quiet: the message has to distinguish a
+    merely tight join from a directly opposed one, or the warning that
+    matters most (symmetry-locked registry) drowns in the ones that
+    do not.
     """
     config = CoherentInterfaceConfig(gap=0.5, relax_terminations=False)
     builder = CoherentInterfaceBuilder(
@@ -734,3 +740,7 @@ def test_interface_proximity_warns_with_fractional_coordinates_instead_of_raisin
     assert "u=" in message and "v=" in message and "w=" in message
     assert "#" in message
     assert "Cu" in message and "Ni" in message
+    # Half a surface vector sideways, so this is a tight join, not a
+    # symmetry-locked one -- the on-top clause would be a false alarm.
+    assert "lateral offset" in message
+    assert "on-top" not in message.lower()

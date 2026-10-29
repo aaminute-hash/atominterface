@@ -106,6 +106,13 @@ INPLANE_PERIOD_RANGE = 4
 #: and not on the last ulp of a period measured equal to its bound.
 INPLANE_PERIOD_RTOL = 1e-9
 
+#: A cross-interface pair is called on-top when its lateral offset is
+#: under this fraction of the bond scale (5 % of ~2.5 A is ~0.13 A).
+#: Wide enough to catch a stack that merely starts a hair off the
+#: symmetric point, tight enough not to smear the label over ordinary
+#: near-neighbour registries.
+ON_TOP_LATERAL_FRACTION = 0.05
+
 # Strains within 1e-4 (0.01 %) of each other are treated as equally good
 # when ranking lattice matches; see ``_match_lattices``.
 _STRAIN_TIE_DIGITS = 4
@@ -1018,14 +1025,24 @@ def _warn_interface_proximity(
     caller asked for, or two boards pushed into each other.  The distance
     cannot separate those; the fractional coordinates can, so they are
     what the message leads with.
+
+    Nor is a small distance the worst thing this can be.  A pair that is
+    both close *and* laterally undisplaced is on top of its counterpart,
+    and an exactly opposed stack sits on a mirror-symmetric stationary
+    point where the in-plane gradient vanishes by symmetry -- the
+    relaxation converges there, every numerical check stays green, and
+    gamma_int comes out 5.9x high on Cu/Ni(111) and 6.3x high on (110).
+    That is why the lateral offset is measured and named rather than
+    left for the reader to work out.
     """
-    from atominterface.relax.proximity import pairwise_distance_matrix
+    from atominterface.relax.proximity import nearest_image_vectors, pairwise_distance_matrix
 
     measured = [d for d in d_refs if math.isfinite(d)]
     if not measured or n_substrate <= 0 or n_substrate >= len(interface):
         return
     threshold = min(measured) * (1.0 - float(max_strain))
-    matrix = pairwise_distance_matrix(_to_ase(interface))
+    atoms = _to_ase(interface)
+    matrix = pairwise_distance_matrix(atoms)
     cross = matrix[:n_substrate, n_substrate:]
     flat = int(np.argmin(cross))
     i, j = divmod(flat, cross.shape[1])
@@ -1033,15 +1050,41 @@ def _warn_interface_proximity(
     if distance >= threshold:
         return
 
+    # Lateral part of the minimum-image separation: the pair's offset
+    # within the interface plane, with the normal component removed.
+    vectors, _ = nearest_image_vectors(atoms, atoms.positions[i])
+    cell = np.asarray(interface.lattice.matrix, dtype=np.float64)
+    normal = np.cross(cell[0], cell[1])
+    normal = normal / np.linalg.norm(normal)
+    separation = vectors[n_substrate + j]
+    lateral_vector = separation - float(separation @ normal) * normal
+    lateral = float(np.linalg.norm(lateral_vector))
+    solved = np.linalg.lstsq(cell[:2].T, lateral_vector, rcond=None)[0]
+    # ``or 0.0`` normalises a negative zero, so an exactly opposed pair
+    # reads "du=0.000000" rather than "du=-0.000000".
+    du, dv = (float(value) or 0.0 for value in solved)
+    on_top = lateral <= ON_TOP_LATERAL_FRACTION * min(measured)
+
     warnings.warn(
         f"[geometry gate] criterion D (interface proximity) on the assembled interface: "
         f"closest substrate/film pair is {distance:.6f} A, below the {threshold:.6f} A "
         f"contact scale (d_ref {min(measured):.6f} A x (1 - {float(max_strain):.6f})); "
         f"the requested gap was {float(gap):.6f} A. "
         f"pair: {_pair_label(interface, i, n_substrate + j)}. "
+        f"lateral offset = {lateral:.6f} A (du={du:.6f}, dv={dv:.6f}). "
         "Advisory, and ambiguous on distance alone: a pair sharing u, v whose w straddles "
         "the join is the gap you asked for and will relax apart; a pair inside one board "
-        "means the two sides were pushed into each other. Read w before acting.",
+        "means the two sides were pushed into each other. Read w before acting."
+        + (
+            " This pair is also on top of its counterpart (near-zero lateral offset), i.e. "
+            "on-top registry: such a stack sits on a mirror-symmetric stationary point "
+            "whose in-plane gradient vanishes by symmetry, so a relaxation can converge "
+            "there and stay -- it relaxes, passes OOD and looks numerically healthy while "
+            "gamma_int reads 5.9x high on Cu/Ni(111) and 6.3x high on (110). Break the "
+            "symmetry: change the initial registry or the thickness step."
+            if on_top
+            else ""
+        ),
         stacklevel=2,
     )
 
