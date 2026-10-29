@@ -184,13 +184,28 @@ Physical invariance tests are first-class:
 - energy derivative w.r.t. displacement equals negative force
 - overlapping atoms are flagged by the neighbor watcher
 
+## Documentation
+
+| question | where |
+|---|---|
+| Get a number in five minutes | [`docs/quickstart.md`](docs/quickstart.md) |
+| What do the outputs mean, and how much do I trust them? | [`docs/interpretation.md`](docs/interpretation.md) |
+| Something failed, or a result looks wrong | [`docs/troubleshooting.md`](docs/troubleshooting.md) |
+| How were these numbers validated? | [`docs/validation_cu_ni_001.md`](docs/validation_cu_ni_001.md) |
+| Raw data to reproduce it myself | [`docs/validation/cu_ni_001_multi_candidate/`](docs/validation/cu_ni_001_multi_candidate/) |
+| Contributing (read the testing rule before you write a mock) | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+
+One caveat worth repeating: **γ_int from the shipped defaults is biased by about
++0.005 J/m².** Add `--fmax 0.002` before quoting it. The measurement behind
+that is in the validation note.
+
 ## Roadmap
 
 | Phase | What | Status |
 |-------|------|--------|
-| 0.1 | Builder + guard + dummy backend + CLI + report | **this release** |
-| 0.2 | Charge balance / polar termination handling | planned |
-| 0.3 | Interface thermodynamics on a real system (Li/LLZO or Cu/Ni) | planned |
+| 0.1 | Builder + guard + dummy backend + CLI + report | shipped (v0.1.0) |
+| 0.2 | Charge balance / polar termination handling | shipped (v0.2.0) |
+| 0.3 | Interface thermodynamics on a real system (Cu/Ni) | shipped (v0.3.0) |
 | 0.4 | MD → stress/strain → FEniCSx constitutive pipeline | planned |
 
 See `docs/roadmap.md` for the detailed plan.
