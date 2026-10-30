@@ -1,9 +1,13 @@
 """Tests for run provenance metadata."""
 
+import numpy as np
+
+import atominterface.provenance as provenance_module
 from atominterface.provenance import (
     RunMeta,
     _collect_env,
     build_meta,
+    current_seed,
     hash_bytes,
     write_metadata,
 )
@@ -52,3 +56,51 @@ def test_collect_env_values_are_plain_str():
     assert env  # python/platform are always collected
     for key, value in env.items():
         assert type(value) is str, f"{key} is {type(value).__name__}"
+
+
+# ------------------------------------------------------------------
+# current_seed: state-fingerprint semantics (0.5.1)
+# ------------------------------------------------------------------
+def test_current_seed_deterministic_after_np_random_seed():
+    """Same numpy state -> same fingerprint; different state -> different."""
+    np.random.seed(42)
+    first = current_seed()
+    assert first is not None
+    assert first > 0
+    np.random.seed(42)
+    assert current_seed() == first
+    np.random.seed(43)
+    assert current_seed() != first
+
+
+def test_current_seed_none_when_numpy_unavailable(monkeypatch):
+    """The pre-existing graceful path: no numpy state -> None."""
+    monkeypatch.setattr(provenance_module, "np_state", lambda: None)
+    assert current_seed() is None
+
+
+def test_current_seed_survives_malformed_state(monkeypatch):
+    """Any unexpected state shape degrades to None instead of raising."""
+    monkeypatch.setattr(provenance_module, "np_state", lambda: {"state": "not-a-tuple"})
+    assert current_seed() is None
+    # A tuple whose first element is not the 'MT19937' algorithm name.
+    monkeypatch.setattr(
+        provenance_module,
+        "np_state",
+        lambda: {"state": (12345, b"words", 7, False, 0.0)},
+    )
+    assert current_seed() is None
+
+
+def test_build_meta_auto_populates_seed_fingerprint():
+    """build_meta() without a seed records the current state fingerprint."""
+    np.random.seed(7)
+    meta = build_meta(backend="dummy")
+    assert meta.seed is not None
+    assert meta.seed == current_seed()
+
+
+def test_build_meta_explicit_seed_wins():
+    """The explicit-seed contract is untouched by the auto-fill."""
+    meta = build_meta(backend="dummy", seed=42)
+    assert meta.seed == 42

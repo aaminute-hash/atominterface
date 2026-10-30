@@ -14,6 +14,27 @@
   compensation. There are no internal callers (verified by grep at the time
   of the change).
 
+### Fixed
+
+- **`check_force_consistency` is a real finite-difference check.** It used
+  to be a stub that returned `0.0` unconditionally, so "forces consistent
+  with the energy" was never actually verified anywhere. It now computes
+  `max_i |F_i - (-dE/dr_i)|` by a central finite difference of a caller
+  supplied energy function and never mutates the input positions. The
+  signature changes accordingly: the first argument is now an energy
+  function handle `energy_fn(positions) -> float` instead of a scalar
+  energy. The old stub had no real consumers (verified by grep).
+- **`current_seed` reads a real fingerprint of the numpy RNG state.** It
+  used to run `int(state[0])` on numpy's `get_state()` tuple, whose first
+  element is the algorithm name string `'MT19937'` -- the call always
+  raised `ValueError` and was silently swallowed into `None`, so the
+  field was dead. It now returns a deterministic SHA-256 fingerprint of
+  the 624-word MT19937 state plus stream position (state A semantics:
+  a *state* fingerprint, explicitly not a seed for restoration --
+  documented in the docstring). `build_meta()` now fills `seed` from it
+  when no explicit seed is passed, so `metadata.yaml` always records the
+  randomness a run actually used.
+
 ## [0.5.0] - 2026-10-30
 
 **This release changes the numbers a (110) build produces.** Read "Changed"
