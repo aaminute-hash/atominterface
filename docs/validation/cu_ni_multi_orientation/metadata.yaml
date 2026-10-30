@@ -78,6 +78,7 @@ artifacts:
   registry_vs_thickness.csv: 3d9b333e10e21a43f054e29ab4c046df3ceff87e58f4b1b8c24804abc24eaacd
   gap_probe.csv: bf1f1ff19e970a14c5112fd982a7e80fa4fcade236cbbc80866746d6f0e80011
   on_top_remeasured.csv: 6770e6144a20e0c1dfb950a790612df8450c31f3abc0d4a9450c0892e59d4386
+  registry_110_placement.csv: b80991871c25382c578126631af97b6375435427529883bfe1b6778d8979d4fc
 
 caveats:
   - id: no-dft-crosscheck

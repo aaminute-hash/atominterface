@@ -84,6 +84,23 @@ shown to be independent of the entry point (initial gap 2.0 → 2.4 Å moves
   instead of accepting the default. That gap is why the non-(001) warning
   still exists.
 
+  A design for that field exists now — `docs/design/registry_field.md` —
+  and it is **not** a matter of widening the PR #30 shift. Measured on
+  Cu/Ni(110) at 14.4 Å: the as-built join sits on the ridge, and adding
+  the substrate's stacking step to it lands the film on the short bridge,
+  γ_int **1.5189** against the ridge's 0.5952 — 2.55× worse, still
+  `valid=True`, still converged. Placing the join at the substrate's
+  stacking-continuation site instead gives **0.0881**, the scanned
+  minimum, 6.8× below the ridge. The rule has to place the film *at* a
+  site rather than shift it *by* a step; on (111) the two formulations
+  happen to coincide, on (110) they do not. Evidence:
+  `docs/validation/cu_ni_multi_orientation/registry_110_placement.md`.
+
+  **Open decision, not yet taken:** whether the (110) default should
+  change at all. Doing so moves every (110) number from 0.5952 to 0.0881
+  and turns the archived ridge rows into pre-fix records. The design
+  recommends it and says why; it is not implemented.
+
 Both orientation archives carry the same caveat: (111) and (110) have
 **no DFT cross-check** — every number there has exactly one source
 (MACE-MP-0). Only the (001) values rest on the plane-wave reference above.

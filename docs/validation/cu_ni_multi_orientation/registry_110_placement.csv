@@ -1,0 +1,5 @@
+orientation,min_thickness_A,arm,site,placement_rule,n_atoms,gamma_Cu_J_m2,gamma_Ni_J_m2,gamma_int_J_m2,E_interface_eV
+(110),14.4,as-built,ridge,unchanged (v0.4.1 behaviour),24,1.5684,2.1191,0.5952,-115.099365
+(110),14.4,+stacking-step,short-bridge,_off_on_top_shift returns the step unconditionally,24,1.5684,2.1191,1.5189,-114.566643
+(110),14.4,target:trough,trough,join placed at sub_top + stacking step,24,1.5684,2.1191,0.0881,-115.391869
+(110),14.4,target:on-top,on-top,join placed at (0,0),24,1.5684,2.1191,2.0332,-114.270020
