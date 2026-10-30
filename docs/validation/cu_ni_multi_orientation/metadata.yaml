@@ -10,7 +10,9 @@ superseded:
   reason: >
     PR #30 之后，builder 会把恰好对顶的 film 沿衬底自身的堆垛矢量移开，
     该配置的初始注册不再是 on-top，因此 0.898 不再由当前代码产生。
-  remeasured_after_fix: false   # 未重测；本目录不提供新值
+  remeasured_after_fix: true
+  remeasured_record: on_top_remeasured.md
+  remeasured_value_J_m2: 0.0812    # 与 (111)@18.0 在同环境下给出同一个数
   unaffected:
     - 0.081  # (111) fcc 空位 @18.0/21.6 —— 构型在修复前后逐位相同
     - 0.088  # (110) 槽位 —— PR #30 未触碰 (110)
@@ -75,6 +77,7 @@ artifacts:
   registry_scan.csv: 7e48f5c215784545516922169490589b85b6da0af6d227f6f27b4ddf004e5546
   registry_vs_thickness.csv: 3d9b333e10e21a43f054e29ab4c046df3ceff87e58f4b1b8c24804abc24eaacd
   gap_probe.csv: bf1f1ff19e970a14c5112fd982a7e80fa4fcade236cbbc80866746d6f0e80011
+  on_top_remeasured.csv: 6770e6144a20e0c1dfb950a790612df8450c31f3abc0d4a9450c0892e59d4386
 
 caveats:
   - id: no-dft-crosscheck
@@ -87,7 +90,8 @@ caveats:
       是对称性锁定的驻点假象。它们出现在文档与 CSV 中仅作为失效模式示例，
       标注为不可引用，不得当作界面能使用。
       两者现状不同：0.5953 仍可复现（PR #30 未触碰 (110)）；0.898 已不可复现
-      （见 superseded），只能作为修复前的历史记录引用。
+      （见 superseded），只能作为修复前的历史记录引用；
+      修复后的重测值为 0.0812 J/m²（见 on_top_remeasured.md）。
   - id: dz-two-conventions
     text: >
       dz 有两个口径：layer_dz（底层 Ni 层平均 z 减顶层 Cu 层平均 z）与

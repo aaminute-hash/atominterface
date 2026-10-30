@@ -1,0 +1,6 @@
+orientation,min_thickness_A,arm,n_atoms,n_layers_Cu,n_layers_Ni,registry_asbuilt,registry_final,lateral_A,gamma_Cu_J_m2,gamma_Ni_J_m2,gamma_int_J_m2,E_interface_eV,source
+(111),14.4,pre-fix,15,7,8,on-top,on-top,0.0000,1.2994,1.8237,0.8981,-72.875717,run_ab.py prefix
+(111),14.4,post-fix,15,7,8,fcc-hollow,fcc-hollow,1.4758,1.2994,1.8237,0.0812,-73.164230,run_ab.py shipped
+(111),14.4,post-fix(fmax0.01),15,7,8,fcc-hollow,fcc-hollow,1.4758,1.2994,1.8237,0.0817,-73.164032,run_ab.py shipped --fmax 0.01
+(111),18.0,pre-fix,18,9,9,fcc-hollow,fcc-hollow,1.4758,1.2994,1.8237,0.0812,-87.046448,run_ab.py prefix
+(111),18.0,post-fix,18,9,9,fcc-hollow,fcc-hollow,1.4758,1.2994,1.8237,0.0812,-87.046448,run_ab.py shipped
