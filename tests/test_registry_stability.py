@@ -26,8 +26,6 @@ No MLIP is involved: everything here is decided during construction.
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
 
@@ -137,79 +135,62 @@ def test_111_on_top_family_no_longer_warns_about_being_exactly_opposed():
     assert opposed == []
 
 
-@pytest.mark.parametrize("min_thickness", THICKNESSES)
-def test_001_positions_are_bit_identical_without_the_shift(min_thickness, monkeypatch):
-    """(001) must not move by even the last bit.
+def test_shift_is_a_no_op_except_on_the_on_top_family(monkeypatch):
+    """The fix moves exactly one configuration, proven inside this process.
 
-    Compared against a build that has the shift switched off, which is the
-    pre-fix geometry exactly.  ``array_equal`` and not ``allclose``: the
-    claim is that the shift path is a no-op here, and a tolerance would
-    turn "we changed (001)" into a passing test as long as the change was
-    small.
+    Each case is built twice in the same interpreter: once as shipped and
+    once with the shift suppressed.  Comparing the two is what makes the
+    claim testable -- and it is the only thing here that is portable.
+    Absolute Cartesian coordinates are **not**: they are a function of the
+    pymatgen/numpy versions ``pyproject`` happens to resolve, so pinning
+    them makes a test that can only ever pass on the machine that
+    recorded them.  A literal baseline was tried and failed CI on Linux
+    for exactly that reason.
+
+    So "bit-identical" below means *within one environment*: it proves
+    the code change does not move (001) or (110), and says nothing about
+    reproducing absolute positions across platforms.
+
+    ``array_equal`` and not ``allclose``: the claim is that the shift
+    path is a no-op for these boards, and a tolerance would turn "we
+    moved (001)" into a passing test as long as the move was small.
     """
     from atominterface.builders import coherent
 
-    monkeypatch.setattr(coherent, "_OFF_ON_TOP_MIN_SHIFT", math.inf)
-    without = _build((0, 0, 1), min_thickness)
-    monkeypatch.undo()
-    with_shift = _build((0, 0, 1), min_thickness)
+    def _pair(miller, min_thickness):
+        """(as shipped, shift suppressed) for one configuration."""
+        normal = _build(miller, min_thickness)
+        monkeypatch.setattr(coherent, "_off_on_top_shift", lambda *a, **k: np.zeros(2))
+        suppressed = _build(miller, min_thickness)
+        monkeypatch.undo()
+        return normal, suppressed
 
-    assert np.array_equal(without.atoms.get_positions(), with_shift.atoms.get_positions())
-    assert np.array_equal(np.asarray(without.atoms.cell), np.asarray(with_shift.atoms.cell))
-    assert float(with_shift.metadata["registry_lateral_offset_ang"]) == pytest.approx(
-        AS_BUILT_LATERAL_001_110, abs=1e-6
-    )
+    def _registry(candidate) -> float:
+        return float(candidate.metadata["registry_lateral_offset_ang"])
 
+    # (001) and (110) at every documented thickness: the join is off the
+    # symmetric point already, so the shift never fires.
+    for miller in ((0, 0, 1), (1, 1, 0)):
+        for min_thickness in THICKNESSES:
+            normal, suppressed = _pair(miller, min_thickness)
+            assert np.array_equal(normal.atoms.get_positions(), suppressed.atoms.get_positions())
+            assert np.array_equal(np.asarray(normal.atoms.cell), np.asarray(suppressed.atoms.cell))
+            assert _registry(normal) == pytest.approx(AS_BUILT_LATERAL_001_110, abs=1e-6)
 
-@pytest.mark.parametrize("min_thickness", THICKNESSES)
-def test_110_positions_are_bit_identical_without_the_shift(min_thickness, monkeypatch):
-    """(110) is stable across thickness already; the fix must not disturb it.
+    # (111) at 10.8 / 18.0 / 21.6 sits on a hollow site already.
+    for min_thickness in (10.8, 18.0, 21.6):
+        normal, suppressed = _pair((1, 1, 1), min_thickness)
+        assert np.array_equal(normal.atoms.get_positions(), suppressed.atoms.get_positions())
+        assert _registry(normal) == pytest.approx(HOLLOW_LATERAL_111, abs=1e-6)
 
-    Pinned explicitly because its as-built registry is *biased* (the ridge
-    site reads 0.5953 J/m^2 against a scanned 0.088) but it is not
-    *thickness-dependent* -- a different defect, with a different fix, and
-    moving it here would conflate the two.
-    """
-    from atominterface.builders import coherent
-
-    monkeypatch.setattr(coherent, "_OFF_ON_TOP_MIN_SHIFT", math.inf)
-    without = _build((1, 1, 0), min_thickness)
-    monkeypatch.undo()
-    with_shift = _build((1, 1, 0), min_thickness)
-
-    assert np.array_equal(without.atoms.get_positions(), with_shift.atoms.get_positions())
-    assert float(with_shift.metadata["registry_lateral_offset_ang"]) == pytest.approx(
-        AS_BUILT_LATERAL_001_110, abs=1e-6
-    )
-
-
-#: Cartesian positions of Cu/Ni(001) at 10.8 A, as recorded by the
-#: validation matrix before the fix.  A literal, so the file carries one
-#: hard external anchor instead of only self-referential comparisons.
-PINNED_001_10P8_POSITIONS = [
-    [0.0, 0.0, 11.748750000000001],
-    [1.2780955069946844, 1.2780955069946847, 9.941249999999998],
-    [0.0, 0.0, 15.363750000000001],
-    [1.2780955069946844, 1.2780955069946847, 13.55625],
-    [0.0, 0.0, 18.97875],
-    [1.2780955069946844, 1.2780955069946847, 17.171249999999997],
-    [0.0, 0.0, 22.74075],
-    [-1.2780955069946842, 1.2780955069946847, 20.97875],
-    [0.0, 0.0, 26.26475],
-    [-1.2780955069946842, 1.2780955069946847, 24.502750000000006],
-    [0.0, 0.0, 29.78875],
-    [-1.2780955069946842, 1.2780955069946847, 28.02675],
-    [0.0, 0.0, 33.31275],
-    [-1.2780955069946842, 1.2780955069946847, 31.55075],
-]
-
-
-def test_001_positions_match_the_recorded_baseline():
-    """The (001) geometry the published numbers were measured on, verbatim."""
-    candidate = _build((0, 0, 1), 10.8)
-    positions = candidate.atoms.get_positions()
-    assert len(positions) == len(PINNED_001_10P8_POSITIONS)
-    assert np.array_equal(np.asarray(positions, dtype=float), np.asarray(PINNED_001_10P8_POSITIONS))
+    # (111) at 14.4 is the one the fix exists for -- and the case that
+    # keeps the rest of this test honest.  Without it, a broken
+    # monkeypatch or a helper that always returns zeros would still pass
+    # every "the two builds agree" assertion above.
+    normal, suppressed = _pair((1, 1, 1), 14.4)
+    assert not np.array_equal(normal.atoms.get_positions(), suppressed.atoms.get_positions())
+    assert _registry(suppressed) == pytest.approx(0.0, abs=1e-6)
+    assert _registry(normal) == pytest.approx(HOLLOW_LATERAL_111, abs=1e-6)
 
 
 def _slab(species: str, a: float, miller, min_thickness):
