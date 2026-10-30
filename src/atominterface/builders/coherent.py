@@ -811,7 +811,11 @@ def _format_matrix(matrix) -> str:
 
 
 def _match_lattices(
-    sub_lattice, film_lattice, config: CoherentInterfaceConfig, strain_limit=None
+    sub_lattice,
+    film_lattice,
+    config: CoherentInterfaceConfig,
+    strain_limit=None,
+    label: str = "",
 ) -> list[_MatchInfo]:
     """Generate coherent matches with strain filtering.
 
@@ -827,6 +831,11 @@ def _match_lattices(
         :meth:`CoherentInterfaceBuilder.preview_matches` reports the best
         geometry the pair can achieve, which is what a user needs to see
         when a tolerance rejects everything.
+    label
+        Optional identity string of the pair being matched (e.g. the
+        two Miller index sets, which this function cannot see).  It is
+        only surfaced in the ZSL-fallback warning so the operator can
+        tell *which* pair silently changed enumeration path.
     """
     from pymatgen.analysis.interfaces.zsl import ZSLGenerator  # noqa: WPS433
 
@@ -900,9 +909,19 @@ def _match_lattices(
                     film_area=abs(float(np.linalg.det(film_t))) * film_cell_area,
                 )
             )
-    except Exception:  # noqa: BLE001
-        # ZSL is best-effort; fall through to the fallback below.
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # ZSL is best-effort, but the fallback below is a *different*
+        # enumeration: the matches it returns (and their strains) can
+        # differ as a whole, which silently changes physical results.
+        # Warn with an identifying label so the switch is never silent.
+        where = f" for {label}" if label else ""
+        warnings.warn(
+            f"ZSL lattice matching failed{where} "
+            f"({type(exc).__name__}: {exc}); falling back to brute-force "
+            "commensurate search -- matches and strains may differ from "
+            "the ZSL path",
+            stacklevel=2,
+        )
 
     if not matches:
         matches = _fallback_matches(sub_lattice, film_lattice, config, strain_limit=limit)
@@ -2514,11 +2533,18 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         cell, so a single match covers every termination pair.
         """
         sub_terms, film_terms = self._prepared_slabs() if slabs is None else slabs
+        # The match helper cannot see the Miller indices; the builder can,
+        # so it labels the pair for the ZSL-fallback warning.
+        label = (
+            f"substrate {tuple(int(i) for i in self.config.substrate_miller)} / "
+            f"film {tuple(int(i) for i in self.config.film_miller)}"
+        )
         return _match_lattices(
             sub_terms[0][1].lattice.matrix,
             film_terms[0][1].lattice.matrix,
             self.config,
             strain_limit=strain_limit,
+            label=label,
         )
 
     def preview_matches(self, limit: int = 5) -> list[_MatchInfo]:
