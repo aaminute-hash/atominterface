@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.4.0] - 2026-10-30
+
+Closes the non-(001) gap: orientations other than (001) now build correct
+geometry, and the one remaining way they can still be wrong is at least
+reported instead of silently producing a credible number.
+
+A note on numbering: **the version no longer tracks the phase number.**
+Phase 0.4 in `docs/roadmap.md` (the MD -> constitutive pipeline) is still
+planned; v0.4.0 ships the Cu/Ni (111) and (110) work below.
+
+### Added
+
+- **Miller indices for both sides.** `--sub-miller` / `--film-miller` on
+  example 03 and `substrate_miller` / `film_miller` on
+  `CoherentInterfaceConfig`, so an orientation other than (001) can be
+  requested at all. The run banner now names the orientation instead of
+  implying (001).
+- **A geometry gate on the assembled interface.** Assembly refuses an
+  interface whose area is not conserved (`GeometryGateError`), and warns
+  when the shortest in-plane period falls below the nearest-neighbour
+  distance or when a cross-interface pair is closer than the contact scale.
+  The proximity warning names on-top registry when the lateral offset is
+  exactly zero, and reports the measured lateral offset in A so two runs
+  can be compared.
+- **A warning that a non-(001) registry has not been scanned.** Any run
+  whose Miller index is not (001) now warns that the registry it was handed
+  may sit on a symmetry-locked stationary point, quoting the measured
+  Cu/Ni evidence (6.8x on (110), 5.9x on (111)). (001) is exempt: the
+  published protocol enumerates ten candidates itself.
+- **The Cu/Ni (111) and (110) archive.**
+  `docs/validation/cu_ni_multi_orientation/` holds the registry scans, the
+  registry-vs-thickness map, the entry-point control and the fmax
+  comparison. gamma_int = 0.081 J/m^2 on (111) and 0.088 J/m^2 on (110),
+  both from explicit registry scans. Both orientation archives carry the
+  caveat that they have **no DFT cross-check** — every number there has
+  exactly one source (MACE-MP-0).
+
+### Fixed
+
+- **Non-(001) slab geometry was wrong.** The builder read `matrix[:2]` as
+  the in-plane lattice, which is only true on (001): on (111) and (110) the
+  pymatgen slab does not have both a and b in the interface plane. Area,
+  layer count and in-plane period were all wrong as a result — Cu(111)
+  reported 3.2671 A^2 against a true 5.6587 A^2. Slabs are now oriented so
+  the surface normal is exactly +z (symmetric slabs included) and the four
+  `abs(det(v[:, :2]))` area computations use `|a x b|`. **(001) is
+  bit-identical across this change**: the area is locked at its full
+  precision 6.5341125 A^2 and a re-run reproduces every published (001)
+  energy exactly.
+- **The coherent bulk reference was strained on the wrong plane.** It
+  applied `base * [1+e, 1+e, 1+sz]`, which is equibiaxial on (001) only:
+  on (111) that gives 3.72e-2 of in-plane anisotropy and flips the sign of
+  the normal strain. It now uses the deformation gradient
+  `F = I + e(I - nn^T) + sz*nn^T` built from the (hkl) normal.
+- **A published document contradicted itself on the sign of the fmax
+  effect.** `docs/validation_cu_ni_001.md` used `+` in three places and
+  `-` in section 7 for the same quantity. Unified on
+  `delta = gamma(fmax=0.01) - gamma(fmax=0.002)` ("the default batch sits
+  above the converged value"), and section 7 now gives drops with both
+  endpoints so the direction cannot be misread.
+
+### Known limitations
+
+- **The registry problem itself is not fixed.** The initial lateral
+  registry is a function of `--min-thickness`, and every registry is a
+  stationary point a relaxation never leaves: on Cu/Ni(111) the thickness
+  steps 10.8 / 14.4 / 18.0 / 21.6 A give gamma_int 0.081 / 0.898 / 0.081 /
+  0.081 — an 11x jump from the thickness knob alone, which a reader of a
+  thickness scan would otherwise mistake for non-convergence. The builder
+  still does not sample registries; v0.4.0 only downgrades this from
+  silently wrong to warned.
+- `gamma_int(111) = 0.898 J/m^2` and `gamma_int(110) = 0.5953 J/m^2` are
+  **not** values. They are symmetry-locked artefacts, documented as
+  failure-mode examples only and marked not-for-citation.
+
 ## [0.3.0] - 2026-10-28
 
 Closes Phase 0.3.2: the Cu/Ni(001) benchmark is reproducible end to end, and
