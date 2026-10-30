@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.1] - 2026-10-31
+
+### Breaking
+
+- **`transform_forces(f, R)` now returns `f @ R.T` (previously `f @ R`).**
+  Forces are polar vectors: in the row-vector convention the code already
+  uses (`rotate_positions(p, R) = p @ R.T`) a force must co-rotate with the
+  coordinates, so the same `R` maps `+x` onto `-y` for both. The old
+  `forces @ R` rotated forces in the *opposite* direction -- a rigid body's
+  forces did not follow its coordinates. Migration: external consumers that
+  compensated by passing `R.T` themselves can simply drop that
+  compensation. There are no internal callers (verified by grep at the time
+  of the change).
+
 ## [0.5.0] - 2026-10-30
 
 **This release changes the numbers a (110) build produces.** Read "Changed"

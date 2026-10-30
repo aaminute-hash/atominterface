@@ -57,7 +57,15 @@ def rotation_matrix(axis, angle):
 
 
 def transform_forces(forces, R):
-    return forces @ R
+    """Rotate per-atom forces with the same convention as ``rotate_positions``.
+
+    The code lives in the row-vector world: coordinates transform as
+    ``positions @ R.T``.  Forces are polar vectors and co-rotate with the
+    rigid body, so they take the same right-multiplication, ``forces @ R.T``.
+    (Before 0.5.1 this returned ``forces @ R``, which rotates forces in the
+    *opposite* direction to the coordinates under the same ``R``.)
+    """
+    return forces @ R.T
 
 
 def transform_stress_voigt(stress_voigt, R):

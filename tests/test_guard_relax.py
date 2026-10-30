@@ -8,6 +8,7 @@ from atominterface.backends import get_calculator, list_backends
 from atominterface.physics import (
     ev_per_a3_to_gpa,
     gpa_to_ev_per_a3,
+    rotate_positions,
     rotation_matrix,
     transform_forces,
     transform_stress_voigt,
@@ -99,7 +100,50 @@ def test_forces_transform_as_vectors():
     F = np.array([[1.0, 0.0, 0.0]])
     R = rotation_matrix("z", 90.0)
     Fp = transform_forces(F, R)
-    assert np.allclose(Fp, [[0.0, 1.0, 0.0]], atol=1e-12)
+    # Revised in 0.5.1: the old expectation [[0, 1, 0]] pinned the wrong
+    # contract.  Forces are polar vectors, so with rotate_positions using
+    # positions @ R.T the force must be forces @ R.T too -- an +x force
+    # rotates onto -y, exactly the way the +x coordinate does.
+    assert np.allclose(Fp, [[0.0, -1.0, 0.0]], atol=1e-12)
+
+
+def test_rotate_positions_rigid_body_invariants():
+    """rotate_positions is a rigid-body rotation of the point set.
+
+    Zero coverage before 0.5.1: only rotation_matrix's orthogonality was
+    tested.  (1) pairwise distance geometry must be preserved; (2) forces
+    rotated with transform_forces must keep the per-atom F.r dot products,
+    i.e. both arrays share one rotation convention.
+    """
+    rng = np.random.default_rng(11)
+    positions = rng.normal(0.0, 2.0, (4, 3))
+    forces = rng.normal(0.0, 1.0, (4, 3))
+    R = rotation_matrix([1.0, 2.0, 3.0], 37.0)
+
+    p_rot = rotate_positions(positions, R)
+    f_rot = transform_forces(forces, R)
+
+    def _pair_sq_dist(p):
+        d = p[:, None, :] - p[None, :, :]
+        return np.einsum("ijk,ijk->ij", d, d)
+
+    assert np.allclose(_pair_sq_dist(p_rot), _pair_sq_dist(positions), atol=1e-12)
+    assert np.allclose(
+        np.einsum("ij,ij->i", f_rot, p_rot),
+        np.einsum("ij,ij->i", forces, positions),
+        atol=1e-12,
+    )
+
+
+def test_forces_and_positions_share_rotation_convention():
+    """Synthetic check: the pairwise F.r invariant survives one rotation jointly."""
+    rng = np.random.default_rng(23)
+    positions = rng.normal(0.0, 1.5, (6, 3))
+    forces = rng.normal(0.0, 0.5, (6, 3))
+    R = rotation_matrix([0.3, -1.0, 0.7], 123.0)
+    before = positions @ forces.T
+    after = rotate_positions(positions, R) @ transform_forces(forces, R).T
+    assert np.allclose(after, before, atol=1e-12)
 
 
 # ------------------------------------------------------------------
