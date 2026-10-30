@@ -36,7 +36,7 @@ weakest number in the ledger, at ~1.7 % of the quantities it is
 subtracted from). A co-computed plane-wave reference was added later,
 as §7 of the same note.
 
-One of the two deliverables below is now closed, one is still open.
+Both deliverables below are now closed.
 **The VASP single point is computed** — 23 single points on the
 MACE-relaxed geometries (VASP 6.4.2, PAW_PBE, energies taken as
 `energy(sigma->0)` throughout), giving γ_Cu 1.5023 vs 1.4980 J/m²
@@ -48,9 +48,37 @@ is MACE-MP-0 model error, not smearing (which shifts γ_Ni by
 0.002 J/m²) or missing spin (which moves VASP *towards* MACE). Record
 and controls: [validation note §7](docs/validation_cu_ni_001.md#7-vasp-cross-check-co-computed-reference).
 
-Still open: the candidate table is **one 1x1 cell, not 5–10**: the
-demo caps `max_area` at 100 A^2 and `max_candidates` at 1. Widening
-that is a knob, not a code change, but it has not been run.
+**The candidate table is closed too** — 10 low-strain candidates with a
+per-candidate formation energy and OOD trace, plus thickness/vacuum
+scans and a float64 control, archived in
+[`docs/validation/cu_ni_001_multi_candidate/`](docs/validation/cu_ni_001_multi_candidate/).
+
+**(111) and (110) are archived as well**, in
+[`docs/validation/cu_ni_multi_orientation/`](docs/validation/cu_ni_multi_orientation/):
+γ_int = 0.081 J/m² and 0.088 J/m², both from explicit registry scans and both
+shown to be independent of the entry point (initial gap 2.0 → 2.4 Å moves
+γ_int by ≤ 1e-4 J/m²). Two things came out of that work:
+
+- **A geometry bug, now fixed** (PR #25): the builder read `matrix[:2]` as
+  the in-plane lattice, which is only true on (001). Area, layer count and
+  in-plane period were all wrong on (111)/(110) — Cu(111) reported
+  3.2671 Å² against a true 5.6587 Å². (001) comes out bit-identical
+  across the fix.
+- **A design gap, still open: the initial lateral registry is a function
+  of `--min-thickness`**, and every registry is a symmetry-locked
+  stationary point that a relaxation never leaves. On Cu/Ni(111) the
+  thickness steps 10.8 / 14.4 / 18.0 / 21.6 Å start at fcc-hollow /
+  on-top / fcc-hollow / hcp-hollow and give γ_int 0.081 / 0.898 / 0.081 /
+  0.081 — an 11× jump from the thickness knob alone, which a reader of a
+  thickness scan would otherwise mistake for non-convergence. PR #25
+  downgrades this from *silently wrong* to *warned*: a non-(001) run now
+  warns that its registry has not been scanned, and prints the measured
+  lateral offset so two runs can be compared. **The registry problem
+  itself is not fixed** — the builder still does not sample registries.
+
+Both orientation archives carry the same caveat: (111) and (110) have
+**no DFT cross-check** — every number there has exactly one source
+(MACE-MP-0). Only the (001) values rest on the plane-wave reference above.
 
 The energy-credible core — real uMLIP backends with model provenance,
 `interface_formation_energy` + reference slabs, committee OOD trace,
