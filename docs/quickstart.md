@@ -3,16 +3,19 @@
 Three steps: prove the pipeline works (20 s), compute a real number (1 min),
 and learn why the default parameters need one flag changed (1 min).
 
-Every command below was run against **v0.3.0** on a Windows CPU machine with
-`torch 2.14.1+cpu` and `mace-torch 0.3.17`. The timings and outputs shown are
-real, not illustrative.
+Every command below was run on a Windows CPU machine with `torch 2.14.1+cpu`
+and `mace-torch 0.3.17`. The timings and outputs shown are real, not
+illustrative. They were captured on **v0.3.0**; the (001) default path shown
+here builds bit-identical structures on **v0.4.0** (cell, positions and species
+order are bit-for-bit equal at every `--min-thickness` from 10.8 to 21.6 A), so
+upgrading does not move the numbers below.
 
 ---
 
 ## 0. Install
 
 ```bash
-pip install https://github.com/aaminute-hash/atominterface/releases/download/v0.3.0/atominterface-0.3.0-py3-none-any.whl
+pip install https://github.com/aaminute-hash/atominterface/releases/download/v0.4.0/atominterface-0.4.0-py3-none-any.whl
 ```
 
 The MLIP backends are optional extras. For the MACE path below:

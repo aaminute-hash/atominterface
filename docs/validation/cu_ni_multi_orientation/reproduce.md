@@ -23,15 +23,20 @@
 - MACE-MP-0 medium 权重（44.42 MB）。首次运行自动下载；也可预先放置：
   `https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model`
   权重 SHA-256：`01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845`。
-- atominterface **0.3.0** 源码（须包含 `c440b81`
+- atominterface 源码，**必须包含 `c440b81`**
   `fix(examples): strain the coherent bulk reference on the (hkl) plane`，
-  否则 (111)/(110) 的 γ_Ni 会随层数单调漂移、不收敛）。
+  否则 (111)/(110) 的 γ_Ni 会随层数单调漂移、不收敛。
+  **不要用 `v0.3.0` 的 tag**：`v0.3.0` 比 `c440b81` 落后 9 个提交，不含该修复，
+  照它检出无法复现本目录任何数值。首个包含 `c440b81` 的发布版是 **v0.4.0**。
+  测量时代码自报的 `__version__` 仍是 `0.3.0`（版本号在 `c440b81` 之后才 bump），
+  这是本目录此前写作 "0.3.0" 的由来——它指版本字符串，不是发布版。
 - **`PYTHONPATH` 必须显式指定**：venv 里的 editable 安装指向旧位置，
   不指定会静默加载错版本。
   `PYTHONPATH=<repo>/src`
-- 本目录所有数据在 `F:/tmp/wt-111b`（分支 `fix/non-001-slab-geometry`，
-  HEAD `c440b81`）上测得；入口无关性那批在钉死的 `F:/tmp/wt-111c`
-  （detached HEAD @ `c440b81`）上测得。
+- 本目录所有数据在 `fix/non-001-slab-geometry` 分支的 **`c440b81`** 上测得
+  （当时位于 `F:/tmp/wt-111b`；入口无关性那批在钉死该提交的 `F:/tmp/wt-111c`）。
+  `F:/tmp/...` 是原作者机器上的路径，**不是复现所需的目录结构**——你只需要
+  `git checkout c440b81`。
 
 ---
 
