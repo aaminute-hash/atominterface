@@ -33,9 +33,10 @@
 - **`PYTHONPATH` 必须显式指定**：venv 里的 editable 安装指向旧位置，
   不指定会静默加载错版本。
   `PYTHONPATH=<repo>/src`
-- 本目录所有数据在 `F:/tmp/wt-111b`（分支 `fix/non-001-slab-geometry`，
-  HEAD `c440b81`）上测得；入口无关性那批在钉死的 `F:/tmp/wt-111c`
-  （detached HEAD @ `c440b81`）上测得。
+- 本目录所有数据在 `fix/non-001-slab-geometry` 分支的 **`c440b81`** 上测得
+  （当时位于 `F:/tmp/wt-111b`；入口无关性那批在钉死该提交的 `F:/tmp/wt-111c`）。
+  `F:/tmp/...` 是原作者机器上的路径，**不是复现所需的目录结构**——你只需要
+  `git checkout c440b81`。
 
 ---
 
