@@ -7,7 +7,13 @@ status: 定稿（γ_int 由显式注册扫描定稿）；无 DFT 交叉验证，
 archived: 2026-10-30
 
 tool: atominterface
-version: 0.3.0
+version: 0.3.0            # 测量时代码自报的 __version__（版本号此后才 bump）
+version_is_release: false  # 不是发布版；见 version_note
+version_note: >-
+  该状态为 commit c440b81，比 v0.3.0 的 tag 领先 9 个提交，因此 v0.3.0 无法复现本目录
+  任何数值。首个包含 c440b81 的发布版是 v0.4.0（v0.4.0 ⊃ c440b81，ahead_by 17）。
+  引用发布版请写 v0.4.0。v0.4.0 相对 c440b81 只增加几何闸门与告警：12 个文档化构型
+  （(001)/(111)/(110) × 10.8/14.4/18.0/21.6 Å）的 cell、positions、物种顺序逐位相同。
 backend: mace
 backend_version: 0.3.17
 model_hash: MACE-MP-0/medium@mace-torch:0.3.17:sha256:01bfe2210013
