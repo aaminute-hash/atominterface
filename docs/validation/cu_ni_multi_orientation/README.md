@@ -12,7 +12,8 @@
 数据来源为 `F:/tmp/d1_111_fixed/`（结果报告 §10–§13），CSV 由脚本从机器可读
 产物直接导出，**无手抄、无手工四舍五入**。
 
-全程：**atominterface 0.3.0**、`examples/03_interface_energy.py`、MACE-MP-0
+全程：**atominterface 源码 @ `c440b81`**（首个包含它的发布版是 **v0.4.0**；
+该提交自报 `__version__ = 0.3.0`，引用时**不得写成 v0.3.0**）、`examples/03_interface_energy.py`、MACE-MP-0
 medium（`sha256:01bfe2210013`）、float32、CPU、`seed=0`、真空 15 Å、初始
 gap 2.0 Å、参考态 `strained-coherent`、`area_source=candidate.area`。
 
