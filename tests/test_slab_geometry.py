@@ -628,11 +628,17 @@ def test_non_001_orientation_warns_that_the_registry_was_never_scanned(miller):
     # longer was measured not to help, so the message has to say so.
     assert "900 steps" in message
 
-    # The thickness knob moves the registry, which makes a thickness scan
-    # read like a convergence failure.  10.8 / 14.4 / 18.0 / 21.6 A gave
-    # 0.081 / 0.898 / 0.081 / 0.081 J/m^2 on Cu/Ni(111): an 11x step from
-    # the thickness alone, with nothing sliding during relaxation.
-    assert "0.898" in message and "11x" in message
+    # The registry is inherited from the slab cuts, not scanned over
+    # candidate sites, and there is no config field to request one.  That
+    # is the gap that remains and the reason the warning exists at all.
+    assert "has not been scanned" in message
+    assert "inherited from the two slab cuts" in message
+    assert "no configuration field to request one" in message
+    # ...and what changed: a film that would sit on top is moved off, so
+    # the registry no longer collapses to on-top as the thickness moves.
+    # Pinned because a message that kept describing the old defect would
+    # still pass every other assertion here.
+    assert "no longer collapses to" in message
 
     # The one number that makes two non-(001) runs comparable at all: the
     # as-built registry, in A, measured once during assembly.  Asserted

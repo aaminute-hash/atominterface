@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 from unittest.mock import MagicMock, patch
 
@@ -927,8 +928,11 @@ def _unexpected_warnings(caught):
     emitted by this very build and both owned by
     ``tests/test_slab_geometry.py``, which asserts them positively:
 
-    * ``[geometry gate]`` -- on-top stacking at the default 2.0 A gap
-      always puts the join inside a bond;
+    * ``[geometry gate]`` -- criterion D reports a join closer than the
+      contact scale, which is a fact about the gap rather than about
+      polarity.  At the default 2.0 A gap this fixture no longer produces
+      one (the film is placed off the opposed site), but the gate fires
+      again as soon as a gap is asked for that really is inside a bond;
     * ``[orientation]`` -- these boards are rocksalt (111), and every
       non-(001) orientation is warned about exactly once per build.
 
@@ -944,15 +948,18 @@ def _unexpected_warnings(caught):
     ]
 
 
-def test_geometry_gate_warning_filtered_above_is_asserted_here():
-    """The warning the helper above filters out, asserted positively.
+def test_rocksalt_111_join_is_no_longer_exactly_opposed():
+    """The off-on-top placement is material-agnostic, not tuned to Cu/Ni.
 
-    Filtering a warning out of an assertion is only safe while something
-    else insists it still fires -- otherwise a future change to the
-    threshold makes it vanish silently and the filter keeps looking
-    green.  On-top NaCl(111) stacking puts the join at exactly the
-    requested 2.0 A gap, inside the 2.82 A NaCl bond, so criterion D has
-    to speak up.
+    Rocksalt (111) used to stack exactly opposed here too -- registry
+    8.9e-16 A -- for the same reason fcc (111) did: both boards' join
+    layers landed on the same sublattice.  The fix reads the stacking
+    step off the substrate, so it has to work on a rocksalt board without
+    being told it is rocksalt.  a/sqrt(6) = 5.64/2.449 = 2.3025 A is the
+    (111) stacking step of this cell.
+
+    Asserted here rather than in the Cu/Ni tests because those could pass
+    on a helper that special-cases the one alloy the suite measures.
     """
     builder = _polar_builder(symmetric_slabs=False)
     with warnings.catch_warnings(record=True) as caught:
@@ -960,8 +967,35 @@ def test_geometry_gate_warning_filtered_above_is_asserted_here():
         candidates = builder.build()
 
     assert candidates
+    registry = float(candidates[0].metadata["registry_lateral_offset_ang"])
+    assert registry == pytest.approx(2.302520, abs=1e-3)
+    # Off the symmetric point, so the join is no longer inside the bond at
+    # the default gap and criterion D has nothing to report.
+    assert [w for w in caught if "criterion D" in str(w.message)] == []
+
+
+def test_geometry_gate_warning_filtered_above_is_asserted_here():
+    """The warning the helper above filters out, asserted positively.
+
+    Filtering a warning out of an assertion is only safe while something
+    else insists it still fires -- otherwise a future change to the
+    threshold makes it vanish silently and the filter keeps looking
+    green.
+
+    The join is no longer opposed at the default 2.0 A gap, so the close
+    join this needs is produced the honest way: by asking for a smaller
+    gap.  With the film 2.3025 A off in-plane, ``sqrt(gap^2 +
+    2.3025^2)`` has to fall under the 2.679 A contact scale, which it
+    does for gap = 1.0 A.
+    """
+    builder = _polar_builder(symmetric_slabs=False, gap=1.0)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        candidates = builder.build()
+
+    assert candidates
     proximity = [w for w in caught if "criterion D" in str(w.message)]
-    assert proximity, "on-top stacking at the default gap went unreported"
+    assert proximity, "a join inside the bond scale went unreported"
 
     message = str(proximity[0].message)
     # Same elements every gate message carries.  Pinned individually: a
@@ -971,11 +1005,26 @@ def test_geometry_gate_warning_filtered_above_is_asserted_here():
     assert "contact scale" in message
     assert "requested gap" in message
     assert "u=" in message and "v=" in message and "w=" in message
-    # ...and the one that makes this pair interesting: it is directly
-    # opposed, i.e. a candidate symmetry-locked registry rather than a
-    # merely tight gap.
-    assert "lateral offset = 0.000000 A" in message
-    assert "on-top" in message.lower()
+
+    # The two numbers the comparison is actually made of, quoted rather
+    # than inferred: without them the test passes on any warning that
+    # happens to mention criterion D.
+    measured = re.search(
+        r"closest substrate/film pair is ([0-9.]+) A, below the ([0-9.]+) A", message
+    )
+    assert measured is not None
+    distance, threshold = float(measured.group(1)), float(measured.group(2))
+    assert distance == pytest.approx(2.510299, abs=1e-3)  # sqrt(1.0^2 + 2.3025^2)
+    assert threshold == pytest.approx(2.679, abs=1e-3)  # 2.82 A NaCl bond x (1 - 0.05)
+    assert distance < threshold
+
+    # ...and the one that makes this pair interesting: it is close but
+    # *not* opposed, so the gate reports a tight gap and must not claim a
+    # symmetry-locked registry it does not have.
+    lateral = re.search(r"lateral offset = ([0-9.]+) A", message)
+    assert lateral is not None
+    assert float(lateral.group(1)) == pytest.approx(2.302520, abs=1e-3)
+    assert "exactly opposed" not in message
 
 
 def test_build_symmetric_true_transforms_and_marks_candidates():
