@@ -666,7 +666,16 @@ def test_opposite_slab_charges_do_not_pass_neutral_filter():
 
 
 def test_no_vacuum_cannot_pass_nonpolar_filter():
-    builder = _charged_builder(charge_policy="require-nonpolar", vacuum_thickness=0)
+    """A zero-vacuum board is assembled and then rejected, not skipped.
+
+    ``registry=None`` is pinned because the board this builds is
+    degenerate -- one atom per side, so there is no stacking step to read
+    and no site that could be named for it. That case has its own
+    assertion (see ``test_registry_field.py``); what is under test here
+    is the charge filter, which needs the candidate to have been built
+    first.
+    """
+    builder = _charged_builder(charge_policy="require-nonpolar", vacuum_thickness=0, registry=None)
     assert builder.build() == []
     assert builder.last_build_report["empty_stage"] == "charge_filter"
 
@@ -960,6 +969,14 @@ def test_rocksalt_111_join_is_no_longer_exactly_opposed():
 
     Asserted here rather than in the Cu/Ni tests because those could pass
     on a helper that special-cases the one alloy the suite measures.
+
+    Under `registry="auto"` (the v0.5.0 default) the number is unchanged
+    and its meaning is not: it is now the magnitude of a site the config
+    *asked for* — the continuation of this board's own stacking sequence
+    — rather than of whatever the cut left behind on a thickness that
+    happened to need moving. It is asserted here for the same reason as
+    before: the placement has to read the step off the board, and a
+    rocksalt board is not a board the suite was tuned on.
     """
     builder = _polar_builder(symmetric_slabs=False)
     with warnings.catch_warnings(record=True) as caught:

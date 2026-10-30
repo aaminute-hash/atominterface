@@ -18,6 +18,7 @@ from atominterface.builders.coherent import (
     CoherentInterfaceBuilder,
     CoherentInterfaceConfig,
     GeometryGateError,
+    measure_registry,
     reference_slabs,
 )
 from atominterface.builders.registry import (
@@ -40,6 +41,7 @@ __all__ = [
     "CoherentInterfaceConfig",
     "GeometryGateError",
     "analyze_charge_polarity",
+    "measure_registry",
     "BuilderRegistry",
     "builder_registry",
     "get_builder",

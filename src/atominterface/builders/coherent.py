@@ -70,6 +70,7 @@ __all__ = [
     "CoherentInterfaceConfig",
     "CoherentInterfaceBuilder",
     "GeometryGateError",
+    "measure_registry",
     "reference_slabs",
 ]
 
@@ -120,6 +121,20 @@ INPLANE_PERIOD_RTOL = 1e-9
 #: either exactly zero or of order a fraction of an angstrom.
 ON_TOP_LATERAL_TOL = 1e-6
 
+#: Tolerance on the fractional in-plane distance between the join site a
+#: registry requested and the one measured after the film was moved.  A
+#: placement that misses by more than this is refused outright: the join
+#: is a rational fraction of a lattice vector, so a real miss is of order
+#: a tenth of a cell and round-off is of order 1e-16 -- the two are ten
+#: orders apart and there is nothing in between that a tolerance could
+#: legitimately wave through.
+REGISTRY_PLACEMENT_TOL = 1e-6
+
+#: Same tolerance applied to a stacking step when deciding whether some
+#: multiple of it is a lattice vector, i.e. how many sublattices the
+#: stacking sequence resolves.
+_STACKING_STEP_TOL = 1e-6
+
 #: The one orientation whose gamma_int can be quoted without scanning the
 #: lateral registry first -- and only because the published protocol
 #: enumerated ten candidates itself.  Every other orientation is exposed
@@ -144,30 +159,60 @@ _PLANE_Z_FLOOR = 1e-3
 #: nothing" a structural guarantee instead of a floating-point one.
 _OFF_ON_TOP_MIN_SHIFT = 1e-12
 
+#: A measured join offset shorter than this (Å) is the float scatter of an
+#: exactly opposed pair, not a site.  Real sites are rational fractions of
+#: a lattice vector -- either exactly zero or of order a tenth of an
+#: angstrom -- so there is nothing between the two that this could be
+#: suppressing. It is snapped to exact zeros before a placement is solved
+#: for, so the arithmetic that follows is exact rather than carrying 1e-16
+#: into every film coordinate.
+_JOIN_ROUND_OFF = 1e-9
 
-def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
+
+def _describe_registry(registry: str | Sequence[float] | None) -> str:
+    """Name a requested registry the way an advisory message quotes it.
+
+    A mode and an explicit ``(u, v)`` are not two kinds of thing to a
+    reader who has to act on the message, so both are spelled out: the
+    name alone would leave "where is the join?" unanswered, and a bare
+    pair would leave "was this asked for or inherited?" unanswered.
+    """
+    if registry is None:
+        return "registry=None (the site the two slab cuts happen to carry)"
+    if isinstance(registry, str):
+        return f"registry={registry!r}"
+    values = tuple(float(item) for item in registry)
+    if len(values) != 2:
+        return f"registry={registry!r}"
+    return f"registry=(u={values[0]:.6f}, v={values[1]:.6f})"
+
+
+def _warn_unscanned_orientation(
+    config, lateral: float | None = None, registry: str | Sequence[float] | None = None
+) -> None:
     """Say out loud that a non-(001) run ships one unscanned registry.
 
     Three things the caller cannot see from the output otherwise.
 
-    The registry is not chosen, it is inherited: the two boards are
-    stacked with the lateral coordinates their slab cuts happen to carry
-    and only ever moved along the normal, so the join lands on whatever
-    pair of sublattices those cuts imply.  It is never scanned over
-    candidate sites, and there is no way to ask for one --
-    :class:`CoherentInterfaceConfig` has no ``registry`` field.  A film
-    that would land exactly on top of a substrate atom is now moved off
-    that site by the substrate's own stacking step, so the offset no
-    longer collapses to on-top as the thickness changes: what is left is
-    a single site, decided by the slicing rather than by the physics.
+    The registry is now *requested* -- :class:`CoherentInterfaceConfig`
+    has a ``registry`` field and the join is placed on the site it names
+    -- but asking for one site is not scanning the surface. The other
+    sites this orientation resolves are never visited, so a gamma_int
+    read off this run is a number for the site that was asked for and
+    says nothing about the one a scan would have found lower. What the
+    cut would have left is no longer what you get either: a film that
+    would land exactly on top of a substrate atom is moved off that site
+    by the request, so the offset no longer collapses to on-top as the
+    thickness changes: what is left is a single site, decided by the
+    request rather than by the physics.
 
     The geometry gate cannot catch any of this and must not be stretched
     to: a non-(001) board can be level, conserve its area and keep a
     healthy in-plane period while sitting on a high-symmetry registry,
     where the in-plane gradient vanishes by symmetry and the relaxation
     stops where it started -- converged, fmax met, OOD green, valid=True,
-    and wrong. The (110) default ridge site reads 0.5953 J/m^2 against a
-    scanned 0.088, 6.8x high, with a shortest contact of 2.27 A that no
+    and wrong. The (110) ridge site reads 0.5953 J/m^2 against a scanned
+    0.088, 6.8x high, with a shortest contact of 2.27 A that no
     proximity check would flag.
 
     Relaxing longer does not help and is worth saying so: 900 steps left
@@ -176,7 +221,11 @@ def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
 
     ``lateral`` is the as-built registry in A, measured once per
     assembly. It is quoted so two runs can be checked for being the same
-    run before their gamma_int is compared at all.
+    run before their gamma_int is compared at all.  ``registry`` is what
+    the user asked for; it is quoted because "the join sits where you
+    asked" and "the join sits where the cut left it" are the two halves
+    of this warning, and a reader can only tell them apart if the
+    request is named.
     """
     off_001 = [
         f"{side} {tuple(int(index) for index in miller)}"
@@ -186,7 +235,8 @@ def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
     if not off_001:
         return
 
-    registry = (
+    requested = _describe_registry(registry)
+    as_built = (
         f"as-built lateral offset: {lateral:.6f} A (in-plane part of the closest "
         "substrate/film pair; two runs are comparable only if this matches). "
         if lateral is not None
@@ -194,25 +244,30 @@ def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
     )
     warnings.warn(
         f"[orientation] {' and '.join(off_001)}: this orientation is not (001), so the "
-        "lateral registry the builder hands over has not been scanned: it is "
-        "inherited from the two slab cuts, never chosen among candidate sites, and "
-        "there is no configuration field to request one. A film that would sit "
-        "exactly on top of a substrate atom is now moved off that site by the "
-        "substrate's own stacking step, so the registry no longer collapses to "
-        "on-top as the thickness changes -- it is one site, decided by the slicing "
-        "rather than by the physics, and two runs still have to be checked for "
-        f"being on it before their gamma_int can be compared at all. {registry}"
+        "lateral registry the builder hands over has not been scanned: you asked for "
+        f"{requested} and the join has been built on that site, but one requested "
+        "site is not a scan -- every other site of this surface has not been scanned, "
+        "and what the cut would have left is no longer what you get: a film that would "
+        "sit exactly on top of a substrate atom is moved off that site by the request, "
+        "so the registry no longer collapses to on-top as the thickness changes: it is "
+        "one site, decided by the request rather than by the physics, and two runs "
+        f"still have to be checked for being on it before their gamma_int can be "
+        f"compared at all. {as_built}"
         "The site itself is not a geometry violation: it is level, conserves its area "
         "and keeps a healthy in-plane period, but on a high-symmetry registry the "
         "in-plane gradient vanishes by symmetry, so a relaxation stops where it "
         "started -- converged, fmax met, OOD green, valid=True, and wrong. (110) shows "
-        "the same thing from its default ridge site: 0.5953 J/m^2 against a scanned "
-        "0.088, 6.8x high. A longer relaxation does not fix it: 900 steps left that "
-        "site bit-identical, and only a thickness step that accumulated in-plane shear "
-        "moved it. Run an explicit registry scan and quote its minimum before citing "
-        "gamma_int for a non-(001) orientation. (001) is the exception: the published "
-        "protocol enumerated ten candidates itself, which is why its value can be "
-        "quoted directly.",
+        "what a site is worth: its ridge site reads 0.5953 J/m^2 against a scanned "
+        "0.088, 6.8x high, and registry='auto' (the default) asks for the trough "
+        "instead -- naming a site is a choice, and this warning cannot make it for "
+        "you. A longer relaxation does not fix it: 900 steps left that site "
+        "bit-identical, and only a thickness step that accumulated in-plane shear "
+        "moved it. Asking for a registry does not lift this warning either: the other "
+        "sites are still unvisited, and only an explicit registry scan (registry="
+        "'scan', not implemented in this release) would visit them. Run that scan and "
+        "quote its minimum before citing gamma_int for a non-(001) orientation. (001) "
+        "is the exception: the published protocol enumerated ten candidates itself, "
+        "which is why its value can be quoted directly.",
         stacklevel=2,
     )
 
@@ -271,6 +326,41 @@ class CoherentInterfaceConfig(BuilderConfig):
         usable area at all, ``"substrate"`` or ``"film"`` commit to that
         side.  A geometric mean of the two is never used -- it would make
         a mismatch look handled instead of reported.
+    registry : str or tuple[float, float] or None, optional
+        Which lateral site the join is built on, as fractional
+        in-plane coordinates of the substrate's in-plane cell:
+
+        ``None``
+            The v0.4.1-and-earlier behaviour, bit for bit: stack the
+            boards as the slab cuts left them and move the film only
+            when that put it exactly on top of a substrate atom.
+        ``"auto"`` (default)
+            The site that continues the substrate's stacking sequence,
+            i.e. its stacking step away from on-top. On fcc (001) that
+            is the site the cuts already give, so every (001) number is
+            unchanged; on (110) it is the trough instead of the ridge.
+        ``"on-top"``
+            ``(0, 0)``: the film's join atom directly above a substrate
+            top-layer atom.
+        ``"hcp"``
+            The *other* hollow of a close-packed surface. Only
+            resolvable when the stacking sequence distinguishes three
+            sublattices (fcc (111) and its relatives); anywhere else it
+            raises, because there the two hollows are the same site and
+            the name would be asserting a distinction that does not
+            exist.
+        ``(u, v)``
+            An explicit fractional in-plane offset. Always accepted, and
+            the only way to ask for a site this vocabulary has no name
+            for.
+
+        Placement is *targeted*: the site is named first and the shift
+        that reaches it is computed second, rather than adding a
+        stacking step to whatever the cut produced -- on (110) those two
+        disagree by a factor of 2.55 in gamma_int. Whatever is asked
+        for is measured after the move and a miss is an error, never a
+        silent fallback. Asking for one site is still not a registry
+        scan; ``"scan"`` is reserved for that and is rejected here.
     """
 
     substrate_miller: tuple[int, int, int] = (0, 0, 1)
@@ -293,6 +383,7 @@ class CoherentInterfaceConfig(BuilderConfig):
     min_thickness_substrate: float | None = None
     min_thickness_film: float | None = None
     area_policy: str = "strict"
+    registry: str | tuple[float, float] | None = "auto"
 
     def validate(self) -> list[str]:
         errors = super().validate()
@@ -324,6 +415,7 @@ class CoherentInterfaceConfig(BuilderConfig):
             errors.append(
                 f"area_policy must be one of {list(AREA_POLICIES)}, got {self.area_policy!r}"
             )
+        errors.extend(_registry_errors(self.registry))
         return errors
 
     def slab_thicknesses(self) -> tuple[float, float]:
@@ -378,6 +470,20 @@ def _lattice_area(lattice: np.ndarray) -> float:
 
 #: Accepted values of :attr:`CoherentInterfaceConfig.area_policy`.
 AREA_POLICIES: tuple[str, ...] = ("strict", "substrate", "film")
+
+#: Accepted string values of :attr:`CoherentInterfaceConfig.registry`.
+#:
+#: Deliberately short, and deliberately missing the site names a surface
+#: scientist would use (``trough``, ``ridge``, ``bridge``,
+#: ``fcc-hollow``). Those names are orientation- and lattice-specific --
+#: fcc (111) resolves three sites at (0,0)/(1/3,1/3)/(2/3,2/3) while
+#: fcc (110) resolves four at (0,0)/(1/2,0)/(0,1/2)/(1/2,1/2), and which
+#: of the (111) hollows is "fcc" depends on the layer below it -- so no
+#: general name parser can exist. What is offered instead is the small
+#: set that can always be *computed*, plus an explicit ``(u, v)`` for
+#: everything else, and every rejected name is answered with the list
+#: rather than guessed at.
+REGISTRY_MODES: tuple[str, ...] = ("auto", "on-top", "hcp")
 
 
 @dataclass(frozen=True)
@@ -1369,6 +1475,411 @@ def _off_on_top_shift(
     return np.asarray(offsets[nearest], dtype=np.float64)
 
 
+def _wrap_frac(delta: np.ndarray) -> np.ndarray:
+    """Shortest representative of a fractional in-plane offset.
+
+    One lattice vector is as good as no displacement, so every offset is
+    reduced to a representative before it is measured, compared or
+    applied. Two measured reasons this is load-bearing and not cosmetic:
+
+    * wrapping a *cartesian* difference is meaningless -- the cell is
+      generally not cubic, so one lattice vector is not a round number
+      of Å -- and it does not raise. It was measured putting a (110)
+      film 0.31 of a cell away from the site it was asked for, with
+      every downstream check still green and the film sliding during
+      relaxation to an energy that had nothing to do with the request.
+    * the (001) registry is half a lattice vector, which exists as both
+      ``+1/2`` and ``-1/2``. Unwrapped, "move the join onto the site the
+      stacking sequence continues to" would move a (001) film by a whole
+      lattice vector: a physically identical structure carrying
+      different numbers, on the one orientation this package has a DFT
+      cross-check for.
+
+    So the order is always fractional -> wrapped -> cartesian, and a
+    distance is only ever taken after the third step.
+    """
+    return delta - np.round(delta)
+
+
+def _in_plane_frac(vector: np.ndarray, sub_2d: np.ndarray) -> np.ndarray:
+    """Cartesian in-plane vector -> fractional coordinates of ``sub_2d``."""
+    matrix = np.asarray(sub_2d, dtype=np.float64)
+    return np.asarray(np.asarray(vector, dtype=np.float64) @ np.linalg.inv(matrix), float)
+
+
+def _join_lateral(
+    sub_coords: np.ndarray, film_coords: np.ndarray, sub_2d: np.ndarray
+) -> np.ndarray | None:
+    """As-built in-plane offset of the join: substrate minus film (Å).
+
+    The minimum-image vector from a film atom in the plane facing the
+    substrate to the nearest substrate atom in its own facing plane,
+    minimised over that film plane; ``None`` when either board is empty
+    or has no atomic plane to measure.
+
+    Convert first, wrap second, multiply third: see :func:`_wrap_frac`.
+    Reading this number on the two boards before they are stacked is
+    what makes targeted placement possible -- it is the same quantity
+    :func:`_closest_cross_pair` reports for the finished stack, so the
+    request and the measurement cannot drift apart into two different
+    definitions of "where the join is".
+    """
+    if not len(sub_coords) or not len(film_coords):
+        return None
+    sub_planes = _atomic_planes(sub_coords[:, 2])
+    film_planes = _atomic_planes(film_coords[:, 2])
+    if not sub_planes or not film_planes:
+        return None
+
+    inv_2d = np.linalg.inv(np.asarray(sub_2d, dtype=np.float64))
+    sub_top = sub_coords[sub_planes[-1], :2] @ inv_2d
+    film_bottom = film_coords[film_planes[0], :2] @ inv_2d
+    best: np.ndarray | None = None
+    best_norm = math.inf
+    for point in film_bottom:
+        offsets = np.asarray(_wrap_frac(sub_top - point) @ sub_2d, dtype=np.float64)
+        norms = np.linalg.norm(offsets, axis=1)
+        nearest = int(np.argmin(norms))
+        if float(norms[nearest]) < best_norm:
+            best_norm = float(norms[nearest])
+            best = np.asarray(offsets[nearest], dtype=np.float64)
+    return best
+
+
+def _stacking_step(sub_coords: np.ndarray, sub_2d: np.ndarray) -> np.ndarray | None:
+    """In-plane offset from the substrate's top plane back down one plane.
+
+    Fractional coordinates, wrapped to the shortest representative.
+    ``None`` when the board has fewer than two planes, i.e. when "which
+    way the sequence is going" is not a question with an answer.
+
+    **Sign.** This is the step *backwards* along the stacking sequence,
+    the negative of the forward one :func:`_off_on_top_shift` moves the
+    film by, and it is the sign the placement target needs. The two are
+    not interchangeable. Written as offsets from an atom in the top
+    plane, the site that continues the sequence is at ``+s_up`` (one
+    more step up), which is ``-s_down`` subtracted back; the registry
+    offset is measured the other way round (substrate minus film), so
+    the target that names that site is ``s_down``. On fcc (111) the two
+    signs are the difference between the fcc and the hcp hollow, and on
+    fcc (110) they coincide only because there every site is half a
+    lattice vector -- which is exactly the coincidence that makes a
+    wrong sign invisible on the orientation where it was tested.
+    """
+    if not len(sub_coords):
+        return None
+    sub_planes = _atomic_planes(sub_coords[:, 2])
+    if len(sub_planes) < 2:
+        return None
+    inv_2d = np.linalg.inv(np.asarray(sub_2d, dtype=np.float64))
+    sub_top = sub_coords[sub_planes[-1], :2] @ inv_2d
+    sub_below = sub_coords[sub_planes[-2], :2] @ inv_2d
+    offsets = _wrap_frac(sub_below - sub_top[0])
+    nearest = int(np.argmin(np.linalg.norm(np.asarray(offsets @ sub_2d, float), axis=1)))
+    return np.asarray(offsets[nearest], dtype=np.float64)
+
+
+def _stacking_period(step: np.ndarray) -> int:
+    """Layers after which the stacking sequence repeats (0 if none found).
+
+    The number of sublattices the sequence resolves: 2 for a surface
+    that alternates, 3 for a close-packed one, 0 for a step that is not
+    a rational fraction the search recognises. It decides which site
+    names mean anything -- "the other hollow" needs three.
+    """
+    for count in (1, 2, 3, 4, 6):
+        if float(np.max(np.abs(_wrap_frac(count * step)))) < _STACKING_STEP_TOL:
+            return count
+    return 0
+
+
+def _sites_of_step(step: np.ndarray, count: int) -> str:
+    """Text list of the ``k x step`` sites, in fractional in-plane coords."""
+    return ", ".join(
+        f"{index}x step -> ({site[0]:+.6f}, {site[1]:+.6f})"
+        for index, site in enumerate(_wrap_frac(float(index) * step) for index in range(count))
+    )
+
+
+def _registry_target_frac(
+    sub_coords: np.ndarray, sub_2d: np.ndarray, mode: str | Sequence[float]
+) -> np.ndarray | None:
+    """The site the join is to be placed on, in fractional in-plane coords.
+
+    ``None`` means "this request cannot be resolved for this board",
+    which the caller turns into an error: a site that cannot be named is
+    not a licence to leave the join where the cut put it.
+
+    The target is a site, not a displacement. That distinction is the
+    whole point: the incremental reading ("move the film by the
+    stacking step") and this one agree on fcc (111), where the cut
+    leaves the film on-top and 0 + step is the fcc hollow, and they
+    disagree on fcc (110), where the cut leaves the film on the ridge
+    and ridge + step is the short bridge -- 1.5189 J/m^2 against a
+    scanned 0.0881, 2.55x the correct target's value.
+    """
+    if isinstance(mode, str):
+        if mode == "on-top":
+            return np.zeros(2, dtype=np.float64)
+        if mode == "auto":
+            step = _stacking_step(sub_coords, sub_2d)
+            return None if step is None else np.asarray(_wrap_frac(step), dtype=np.float64)
+        if mode == "hcp":
+            step = _stacking_step(sub_coords, sub_2d)
+            if step is None:
+                return None
+            period = _stacking_period(step)
+            if period != 3:
+                raise ValueError(
+                    "registry='hcp' names the other hollow of a close-packed surface, "
+                    "which is only a different atom when the stacking sequence "
+                    "resolves three sublattices. This one's stacking step is "
+                    f"(u, v) = ({step[0]:+.6f}, {step[1]:+.6f}) and repeats after "
+                    f"{period if period else 'more than 6'} layer(s), so the sites it "
+                    f"resolves are: {_sites_of_step(step, max(period, 2))} -- 'hcp' and "
+                    "'auto' would land on the same atom. Use registry='auto', "
+                    "registry='on-top' or an explicit (u, v)."
+                )
+            return np.asarray(_wrap_frac(-step), dtype=np.float64)
+        raise ValueError(
+            f"registry must be one of {list(REGISTRY_MODES)}, or an explicit (u, v) "
+            f"fractional in-plane offset; got {mode!r}"
+        )
+    values = np.asarray([float(item) for item in mode], dtype=np.float64)
+    if values.shape != (2,):
+        raise ValueError(
+            f"registry (u, v) must have exactly 2 components, got {values.size}: {mode!r}"
+        )
+    return np.asarray(_wrap_frac(values), dtype=np.float64)
+
+
+def _registry_shift(
+    sub_coords: np.ndarray,
+    film_coords: np.ndarray,
+    sub_2d: np.ndarray,
+    mode: str | Sequence[float],
+) -> np.ndarray:
+    """In-plane displacement that lands the join on the requested site (Å).
+
+    Targeted, so the arithmetic is "where it is minus where it was asked
+    to be": after ``film += shift`` the join reads ``d - shift``, and
+    ``d - shift = target`` is the condition being solved. The result is
+    wrapped to its shortest representative, which is what keeps a (001)
+    request from moving the film by a whole lattice vector.
+
+    Raises when either the target or the as-built offset cannot be
+    measured. It never returns zeros as a way of saying "I could not
+    tell": a join whose site is unknown is reported as unknown, not
+    quietly built at the cut's position and shipped as if it were the
+    answer.
+    """
+    target_frac = _registry_target_frac(sub_coords, sub_2d, mode)
+    if target_frac is None:
+        raise ValueError(
+            f"{_describe_registry(mode)} was requested, but the site it names cannot "
+            "be resolved for this board: the substrate does not have two atomic "
+            "planes to read a stacking step from. Place the join with an explicit "
+            "(u, v) offset, or drop the request -- this package does not build a "
+            "structure at a site it cannot name."
+        )
+    as_built = _join_lateral(sub_coords, film_coords, sub_2d)
+    if as_built is None:
+        raise ValueError(
+            f"{_describe_registry(mode)} was requested, but the join's as-built "
+            "offset cannot be measured: one of the two boards has no atomic plane at "
+            "the join. Nothing is being placed."
+        )
+    # An offset below the floor is not a site, it is the float scatter of an
+    # exactly opposed pair: both boards were cut from the same fractional
+    # coordinates and the difference is the 1e-16 of a cartesian round trip.
+    # Snapping it to exact zeros before the subtraction is what makes "this
+    # request moved the film onto the site the previous release produced" a
+    # bit-exact statement instead of one that differs in the last bit.
+    measured = np.zeros(2, dtype=np.float64)
+    if float(np.linalg.norm(as_built)) >= _JOIN_ROUND_OFF:
+        measured = _in_plane_frac(as_built, sub_2d)
+    shift_frac = _wrap_frac(measured - target_frac)
+    return np.asarray(shift_frac @ sub_2d, dtype=np.float64)
+
+
+def _check_registry_placement(
+    as_built: np.ndarray | None,
+    target_frac: np.ndarray | None,
+    request: str,
+    sub_2d: np.ndarray,
+) -> None:
+    """Re-measure the join after the move; refuse to ship a miss.
+
+    Placement is verified against a fresh measurement rather than
+    trusted, because the failure mode this package exists for is a
+    structure that is self-consistent and wrong. The miss it is looking
+    for has been observed: a cartesian wrap put a (110) film 0.31 of a
+    cell off its requested site, the relaxation converged, fmax was met,
+    OOD stayed green and the reported energy belonged to no site anyone
+    had asked for.
+
+    The comparison is done in fractional coordinates and wrapped before
+    it is subtracted, so half-a-cell and minus-half-a-cell -- the same
+    atom -- never read as a whole cell of error.
+    """
+    if as_built is None or target_frac is None:
+        raise ValueError(
+            f"{request} was requested, but the join could not be re-measured after "
+            "the film was moved, so there is no evidence it sits on the requested "
+            "site. Refusing to report it."
+        )
+    placed_frac = _in_plane_frac(as_built, sub_2d)
+    deviation = _wrap_frac(placed_frac - target_frac)
+    worst = float(np.max(np.abs(deviation)))
+    if worst <= REGISTRY_PLACEMENT_TOL:
+        return
+    cartesian = np.asarray(deviation @ sub_2d, dtype=np.float64)
+    raise ValueError(
+        f"{request} was requested, but the join landed "
+        f"{float(np.linalg.norm(cartesian)):.6f} A from it and the structure is not "
+        "being built: requested site (u, v) = "
+        f"({target_frac[0]:+.6f}, {target_frac[1]:+.6f}), measured "
+        f"({placed_frac[0]:+.6f}, {placed_frac[1]:+.6f}), deviation "
+        f"({deviation[0]:+.3e}, {deviation[1]:+.3e}) fractional. A relaxation would "
+        "converge on the wrong site and look healthy doing it."
+    )
+
+
+def _registry_errors(value: str | tuple[float, float] | list[float] | None) -> list[str]:
+    """Validation errors for a requested :attr:`CoherentInterfaceConfig.registry`.
+
+    Every rejection names what could have been asked for instead: a
+    message that only says "bad registry" leaves the user to guess, and
+    the plausible guesses (``trough``, ``ridge``, ``fcc-hollow``) are
+    exactly the names this vocabulary deliberately refuses to parse.
+    """
+    if isinstance(value, str):
+        errors: list[str] = []
+        if value not in REGISTRY_MODES:
+            errors.append(
+                f"registry must be one of {list(REGISTRY_MODES)}, or a (u, v) explicit "
+                f"fractional in-plane offset, or None; got {value!r}"
+            )
+        if value == "scan":
+            errors.append(
+                "registry='scan' is reserved for a later release: it will build one "
+                "candidate per distinguishable site of the surface. It is not "
+                "implemented yet, so it cannot be requested"
+            )
+        return errors
+    if value is None:
+        return []
+    try:
+        components = tuple(float(item) for item in value)
+    except (TypeError, ValueError):
+        return [
+            f"registry must be one of {list(REGISTRY_MODES)}, or a (u, v) pair of "
+            f"finite floats, or None; got {value!r}"
+        ]
+    if len(components) != 2:
+        return [f"registry (u, v) must have exactly 2 components, got {len(components)}: {value!r}"]
+    if not all(math.isfinite(item) for item in components):
+        return [f"registry (u, v) must be finite floats, got {value!r}"]
+    return []
+
+
+def _registry_as_json(value: str | tuple[float, float] | None) -> str | list[float] | None:
+    """A requested registry in a form a JSON report can carry.
+
+    Tuples survive ``json.dumps`` as arrays, but a tuple in a metadata
+    dict is a value that round-trips into a list and then compares
+    unequal to the tuple the config holds; normalising here is what
+    keeps a recorded run and its replay identical.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    return [float(item) for item in value]
+
+
+def _frac_or_none(value: Sequence[float] | None) -> list[float] | None:
+    """A fractional in-plane pair from the interface properties, or ``None``."""
+    if value is None:
+        return None
+    return [float(item) for item in value]
+
+
+def _registry_lateral_ang(record: dict[str, Any] | None) -> float | None:
+    """Lateral part of a recorded as-built registry, or ``None``."""
+    if not record:
+        return None
+    return float(record["lateral"])
+
+
+def _place_join(
+    sub_coords: np.ndarray,
+    film_coords: np.ndarray,
+    sub_2d: np.ndarray,
+    mode: str | Sequence[float] | None,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Put the join on the site the configuration asks for (Å), then check.
+
+    Mutates ``film_coords[:, :2]`` in place and returns ``(target_frac,
+    as_built)`` -- the site that was resolved and the site the join
+    measured at afterwards, either of which may be ``None`` when the
+    request did not name a site.
+
+    Two placements, and only one of them is a choice of site.
+    ``registry=None`` is the v0.4.1 path, kept bit for bit: nudge the
+    film off an exactly opposed join and otherwise leave the cut alone.
+    Anything else names a site first and solves for the displacement
+    that reaches it, which is the only reading that is correct on
+    (110) -- there the incremental "add the stacking step" arrives at
+    the short bridge, 1.5189 J/m^2 against the trough's 0.0881, while
+    the as-built ridge reads 0.5952.
+
+    The check runs on a measurement taken *after* the move, so it would
+    catch a placement that solved the wrong problem, and it compares in
+    fractional coordinates so that +1/2 and -1/2 -- one atom -- never
+    read as a whole cell of error.
+    """
+    target_frac: np.ndarray | None = None
+    if mode is None:
+        shift = _off_on_top_shift(sub_coords, film_coords, sub_2d)
+    else:
+        target_frac = _registry_target_frac(sub_coords, sub_2d, mode)
+        shift = _registry_shift(sub_coords, film_coords, sub_2d, mode)
+    # A shift below the floor is skipped entirely rather than applied as
+    # zero: a write to every film coordinate is a chance to disagree
+    # with a pinned baseline in the last bit, and skipping it is what
+    # makes "this changed nothing" structural instead of floating-point.
+    if float(np.linalg.norm(shift)) >= _OFF_ON_TOP_MIN_SHIFT:
+        film_coords[:, :2] += shift
+    as_built = _join_lateral(sub_coords, film_coords, sub_2d)
+    if target_frac is not None:
+        _check_registry_placement(as_built, target_frac, _describe_registry(mode), sub_2d)
+    return target_frac, as_built
+
+
+def _record_registry_properties(
+    interface, target_frac: np.ndarray | None, as_built: np.ndarray | None, sub_2d: np.ndarray
+) -> None:
+    """Write what was asked for and where the join actually is onto the stack.
+
+    Three things a reader needs and only assembly can supply. Kept as
+    separate entries because they are three separate claims: a request
+    that names a site and a structure that sits on it are different
+    facts, and collapsing them into the single number
+    ``registry_lateral_offset`` carried before would make a request that
+    was not honoured invisible.
+    """
+    if as_built is not None:
+        as_built_frac = _in_plane_frac(as_built, sub_2d)
+        interface.properties["registry_as_built"] = {
+            "frac": [float(as_built_frac[0]), float(as_built_frac[1])],
+            "lateral": float(np.linalg.norm(as_built)),
+        }
+    if target_frac is not None:
+        interface.properties["registry_target_frac"] = [
+            float(target_frac[0]),
+            float(target_frac[1]),
+        ]
+
+
 def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
     """Stack substrate and film slabs into one coherent interface.
 
@@ -1426,13 +1937,15 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
     film_in_plane = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
     film_coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
 
-    # Off the symmetric point, if that is where the two cuts happened to
-    # meet.  In-plane only, and before anything touches z: the stacking
-    # step is read off the substrate's own planes, so it does not care
-    # where the film will end up along the normal.
-    shift = _off_on_top_shift(sub_coords, film_coords, sub_2d)
-    if float(np.linalg.norm(shift)) >= _OFF_ON_TOP_MIN_SHIFT:
-        film_coords[:, :2] += shift
+    # Place the join in-plane, before anything touches z: every site is
+    # read off the substrate's own planes, so none of this cares where
+    # the film will end up along the normal.
+    target_frac, as_built = _place_join(
+        sub_coords,
+        film_coords,
+        sub_2d,
+        getattr(config, "registry", None) if config is not None else None,
+    )
 
     # Rebuild both cells with a clean z axis so the vacuum budget is exact.
     def _cell(in_plane, c):
@@ -1479,6 +1992,7 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
     registry = _closest_cross_pair(interface, len(substrate_slab))
     if registry is not None:
         interface.properties["registry_lateral_offset"] = registry.lateral
+    _record_registry_properties(interface, target_frac, as_built, sub_2d)
     # Advisory, and deliberately bounded by ``gap`` as well as by the bond
     # scale: ``gap`` is a separation the caller asked for, so a pair at the
     # join sitting at ``gap`` is a request being honoured, not a collision.
@@ -1593,12 +2107,14 @@ def _to_candidate(
     lattice = np.asarray(interface.lattice.matrix, dtype=np.float64)
     area = _lattice_area(lattice)
 
+    properties = getattr(interface, "properties", None) or {}
+
     # Bilateral area.  ``area`` above is the stack's own cell, which is
     # what the rest of the pipeline keeps normalising by; this resolves
     # the two sides separately and records whether they agree.  An
     # unstrained film (legacy stacking) is a legitimate geometry, so a
     # mismatch is recorded, never raised.
-    side_cells = (getattr(interface, "properties", None) or {}).get("side_in_plane_cells")
+    side_cells = properties.get("side_in_plane_cells")
     if isinstance(side_cells, dict) and "substrate" in side_cells and "film" in side_cells:
         substrate_lattice = np.asarray(side_cells["substrate"], dtype=np.float64)
         film_lattice = np.asarray(side_cells["film"], dtype=np.float64)
@@ -1649,9 +2165,21 @@ def _to_candidate(
         # Measured once during assembly (see ``_closest_cross_pair``) and
         # carried through so a downstream reader can tell two candidates
         # apart by the site they start on, not only by their energy.
-        "registry_lateral_offset_ang": (getattr(interface, "properties", None) or {}).get(
-            "registry_lateral_offset"
+        # Downstream consumers read this key; the four beside it add the
+        # request and its result without touching it.
+        "registry_lateral_offset_ang": properties.get("registry_lateral_offset"),
+        # What the user asked for, what the request resolved to, and
+        # where the join was actually built. Three separate entries
+        # because they are three separate claims: the run that asked for
+        # the trough and the run that asked for the ridge can share a
+        # relaxation protocol and differ only here, and a candidate that
+        # relaxed off its as-built site has to stay readable as one.
+        "registry_requested": _registry_as_json(config.registry),
+        "registry_target_frac": _frac_or_none(properties.get("registry_target_frac")),
+        "registry_as_built_frac": _frac_or_none(
+            (properties.get("registry_as_built") or {}).get("frac")
         ),
+        "registry_as_built_lateral_A": _registry_lateral_ang(properties.get("registry_as_built")),
         **match.metadata,
         "rotation_matrix": None if match.rotation is None else match.rotation.tolist(),
     }
@@ -1724,6 +2252,61 @@ def _to_candidate(
     )
 
 
+def measure_registry(atoms: Any) -> dict[str, Any] | None:
+    """Measure the lateral registry an interface currently sits on.
+
+    The same quantity :func:`_assemble_interface` places and records,
+    re-measured on whatever structure is handed in -- which is what
+    makes it usable *after* a relaxation, and after a relaxation is
+    where it matters: the archive holds a Cu/Ni(110) run at 21.6 A that
+    slid from the ridge to the trough on its own, so an as-built site
+    reported without a final one would let a reader take "where it was
+    put" for "where it stopped".
+
+    The two sides are told apart by the ``SLAB_ID`` array every
+    assembled interface carries (``0`` substrate, ``1`` film), and the
+    measurement is the plane-to-plane one used during assembly rather
+    than a second route to the same number: two definitions of "the
+    registry" would be two chances to disagree about what a run
+    shipped.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        An assembled interface carrying a ``SLAB_ID`` array.
+
+    Returns
+    -------
+    dict or None
+        ``{"frac": [du, dv], "lateral": A}`` -- the join's in-plane
+        offset in fractional coordinates of the interface cell and its
+        length in Å -- or ``None`` when the registry cannot be
+        measured: no ``SLAB_ID`` array, a side missing, or a board with
+        no atomic plane at the join. "Not measurable" is a fact and is
+        reported as one; it is never turned into a zero.
+    """
+    arrays = getattr(atoms, "arrays", None)
+    if not arrays or SLAB_ID not in arrays:
+        return None
+    tags = np.asarray(arrays[SLAB_ID], dtype=np.int64)
+    substrate = tags == 0
+    film = tags == 1
+    if not bool(np.any(substrate)) or not bool(np.any(film)):
+        return None
+    positions = np.asarray(atoms.positions, dtype=np.float64)
+    cell = np.asarray(atoms.cell, dtype=np.float64)
+    if cell.shape != (3, 3) or abs(float(np.linalg.det(cell[:2, :2]))) <= 1e-12:
+        return None
+    offset = _join_lateral(positions[substrate], positions[film], cell[:2, :2])
+    if offset is None:
+        return None
+    frac = _in_plane_frac(offset, cell[:2, :2])
+    return {
+        "frac": [float(frac[0]), float(frac[1])],
+        "lateral": float(np.linalg.norm(offset)),
+    }
+
+
 def _select_termination(terms, index: int, side: str):
     """Pick one termination by index from a :func:`_make_slabs` result."""
     for idx, slab in terms:
@@ -1792,6 +2375,47 @@ def reference_slabs(
             film_slab = _strain_film_onto(film_slab, sub_2d)
 
     return _to_ase(sub_slab), _to_ase(film_slab)
+
+
+#: How many distinct assembly-failure messages a build report keeps, and how
+#: wide each one may be.  A registry request this surface cannot name fails
+#: every lattice match the same way, and each match states the fractions in
+#: its own cell -- so the messages differ while the cause does not.
+_ASSEMBLY_DETAIL_LIMIT = 3
+_ASSEMBLY_DETAIL_WIDTH = 240
+
+
+def _note_assembly_reason(report: dict, exc: BaseException) -> None:
+    """Keep one short line saying why an assembled candidate was dropped.
+
+    "No interface could be assembled" is only half an answer: a registry
+    request this surface cannot name -- ``hcp`` on a two-sublattice
+    surface, say -- fails *every* candidate the same way, and without the
+    reason the failure reads like a lattice match that went nowhere. The
+    text is kept once per distinct message rather than once per candidate,
+    because a hundred candidates that die identically have one cause.
+    """
+    reasons = report.setdefault("assembly_reasons", {})
+    key = type(exc).__name__
+    reasons[key] = reasons.get(key, 0) + 1
+    detail = report.setdefault("assembly_detail", [])
+    lines = str(exc).strip().splitlines()
+    text = lines[0] if lines else key
+    if text in detail:
+        return
+    if len(detail) >= _ASSEMBLY_DETAIL_LIMIT:
+        # Appended once and only once: every later message takes this same
+        # branch, and a summary per message would be as long as the list it
+        # was meant to replace.
+        if len(detail) == _ASSEMBLY_DETAIL_LIMIT:
+            detail.append(
+                "... and further attempt(s) that failed the same way; "
+                "assembly_reasons holds the count."
+            )
+        return
+    detail.append(
+        text if len(text) <= _ASSEMBLY_DETAIL_WIDTH else text[: _ASSEMBLY_DETAIL_WIDTH - 1] + "…"
+    )
 
 
 @register_builder("coherent")
@@ -1971,7 +2595,11 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         # registry that was actually built, which does not exist yet when
         # the config is read.  ``None`` keeps the advisory useful even when
         # nothing assembled -- the orientation is still unscanned.
-        _warn_unscanned_orientation(self.config, self._built_lateral_offset(candidates))
+        _warn_unscanned_orientation(
+            self.config,
+            self._built_lateral_offset(candidates),
+            getattr(self.config, "registry", None),
+        )
         return candidates
 
     def _collect_candidates(self, matches: list[_MatchInfo], slabs) -> list[Candidate]:
@@ -2026,8 +2654,9 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
             # honest answer is to say so rather than to return nothing.
             report["assembly_failed"] += 1
             raise
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             report["assembly_failed"] += 1
+            _note_assembly_reason(report, exc)
             return None
         report["assembled"] += 1
         return _to_candidate(interface, sub_slab, film_slab, match, sub_idx, film_idx, self.config)

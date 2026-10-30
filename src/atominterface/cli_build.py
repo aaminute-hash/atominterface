@@ -29,7 +29,11 @@ except ImportError:  # pragma: no cover - older typer builds on the real click
 import atominterface.builders  # noqa: F401  (import side effect: registers built-in builders)
 from atominterface.backends.registry import backend_registry
 from atominterface.builders.candidates import charge_summary
-from atominterface.builders.coherent import CoherentInterfaceConfig
+from atominterface.builders.coherent import (
+    REGISTRY_MODES,
+    CoherentInterfaceConfig,
+    measure_registry,
+)
 from atominterface.builders.registry import builder_registry
 from atominterface.io import canonicalize_arrays
 from atominterface.run_config import load_run_config, save_run_config
@@ -65,6 +69,7 @@ _RUN_CONFIG_KEYS = frozenset(
         "charge_tolerance",
         "dipole_tolerance",
         "symmetric",
+        "registry",
         "relax",
         "backend",
         "committee_backend",
@@ -239,6 +244,80 @@ def _optional_finite_positive(value: float | None) -> float | None:
     return _finite_positive(value)
 
 
+def _registry(value: str) -> str | tuple[float, float] | None:
+    """Parse a requested lateral registry: a mode name, ``u,v``, or ``none``.
+
+    Site names (``trough``, ``ridge``, ``fcc-hollow``) are deliberately
+    absent from the vocabulary: which name means which fractional offset
+    is orientation- and lattice-specific, so a name that cannot be
+    resolved is answered with the list of what can rather than guessed
+    at. ``u,v`` is always available, so nothing is out of reach.
+
+    ``none`` is the spelling of ``registry=None`` -- the pre-0.5.0
+    behaviour, in which the join is left wherever the two slab cuts put
+    it.  It exists so a number quoted from an older release can be
+    reproduced on purpose, which is the only way to check that the change
+    this field made is the change it claims to be.
+    """
+    text = value.strip()
+    if text == "none":
+        return None
+    if "," in text:
+        parts = [part.strip() for part in text.split(",")]
+        if len(parts) != 2:
+            raise typer.BadParameter(
+                "expected two comma-separated fractional components, for example "
+                f"0.5,0.5; got {value!r}"
+            )
+        try:
+            parsed = (float(parts[0]), float(parts[1]))
+        except ValueError:
+            raise typer.BadParameter(
+                f"registry components must be numbers; got {value!r}"
+            ) from None
+        if not all(math.isfinite(item) for item in parsed):
+            raise typer.BadParameter(f"registry components must be finite; got {value!r}")
+        return parsed
+    if text == "scan":
+        # The second stage, not this one. Saying so keeps "misspelled"
+        # distinguishable from "not built yet".
+        raise typer.BadParameter(
+            "'scan' is reserved and not implemented in this release: it would build "
+            "one candidate per distinguishable site, and it is the only thing that "
+            "would retire the non-(001) registry warning. Name a site instead -- "
+            "must be one of: " + ", ".join(REGISTRY_MODES) + ", none (or u,v, e.g. 0.5,0.5)"
+        )
+    if text not in REGISTRY_MODES:
+        raise typer.BadParameter(
+            "must be one of: " + ", ".join(REGISTRY_MODES) + ", none (or u,v, e.g. 0.5,0.5)"
+        )
+    return text
+
+
+def _merged_registry(value: object) -> str | tuple[float, float] | None:
+    """Re-validate a registry value merged from a config file or the command line.
+
+    A recorded run replays its registry as whatever YAML holds -- a list
+    for ``u,v``, a string for a mode -- so both shapes are accepted and
+    put through the same validator the command line would have used.
+    """
+    if isinstance(value, (tuple, list)):
+        if len(value) != 2:
+            raise typer.BadParameter(
+                f"registry (u, v) must have exactly 2 components, got {len(value)}: {value!r}"
+            )
+        try:
+            parsed = (float(value[0]), float(value[1]))
+        except (TypeError, ValueError):
+            raise typer.BadParameter(
+                f"registry (u, v) must be a pair of finite floats; got {value!r}"
+            ) from None
+        if not all(math.isfinite(item) for item in parsed):
+            raise typer.BadParameter(f"registry (u, v) must be finite floats; got {value!r}")
+        return parsed
+    return _registry(str(value))
+
+
 def _parse_oxidation(values: list[str], option: str) -> dict[str, float] | None:
     """Parse repeated Element=charge options without relying on pymatgen."""
     from ase.data import atomic_numbers
@@ -333,6 +412,8 @@ def _report_no_candidates(instance, max_strain: float, max_area: float) -> None:
         if stage == "assembly":
             typer.echo("\nLattice matches were found, but no interface could be assembled.")
             typer.echo(f"Assembly failed for {report.get('assembly_failed', 0)} attempt(s).")
+            for line in report.get("assembly_detail", []):
+                typer.echo(f"  {line}")
             return
         if stage == "no_matches":
             typer.echo("\nNo lattice matches survived the geometry filters.")
@@ -458,6 +539,17 @@ def _relax_candidates(
             "max_ood_score": result.max_ood_score,
             "reasons": result.reasons,
         }
+        # Where the join ended up, measured after the relaxation rather
+        # than recalled from the request: the archive holds a (110) run
+        # that slid from the ridge to the trough on its own, so the site
+        # a relaxation stopped on is not the site it was given. Written
+        # beside the relax record and not into it -- that dictionary is
+        # compared as a whole downstream.
+        measured = measure_registry(candidate.atoms)
+        candidate.metadata["registry_final_frac"] = None if measured is None else measured["frac"]
+        candidate.metadata["registry_final_lateral_A"] = (
+            None if measured is None else measured["lateral"]
+        )
         results[rank] = result
         if result.valid:
             status = "valid/converged"
@@ -613,6 +705,7 @@ def _resolve_run_params(
         "charge_tolerance": _finite_nonnegative(float(_pick("charge_tolerance"))),
         "dipole_tolerance": _finite_nonnegative(float(_pick("dipole_tolerance"))),
         "symmetric": symmetric,
+        "registry": _merged_registry(_pick("registry")),
     }
 
 
@@ -712,6 +805,16 @@ def build(
     film_oxidation: list[str] = typer.Option(
         [], "--film-oxidation", help="Repeat Element=value mappings, e.g. Na=1 or Cl=-1."
     ),
+    registry: str = typer.Option(
+        "auto",
+        "--registry",
+        callback=_registry,
+        help=(
+            "Lateral registry of the join: auto, on-top, hcp, an explicit u,v "
+            "offset (e.g. 0.5,0.5), or none for the pre-0.5.0 behaviour (the join "
+            "stays where the two slab cuts leave it). Names a site; it is not a scan."
+        ),
+    ),
     charge_tolerance: float = typer.Option(
         1e-6,
         "--charge-tolerance",
@@ -781,6 +884,7 @@ def build(
             "charge_tolerance": charge_tolerance,
             "dipole_tolerance": dipole_tolerance,
             "symmetric": symmetric,
+            "registry": registry,
         },
     )
 
@@ -809,6 +913,7 @@ def build(
         charge_tolerance=params["charge_tolerance"],
         dipole_tolerance=params["dipole_tolerance"],
         symmetric_slabs="auto" if params["symmetric"] is None else params["symmetric"],
+        registry=params["registry"],
     )
 
     sub = _load_structure(substrate)
