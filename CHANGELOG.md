@@ -48,6 +48,24 @@
   relative terms and only meaningful in the same environment
   (float-identity conclusions are environment-bound as always).
 
+### Added
+
+- **The default MACE-MP-0 medium download is now integrity-checked.**
+  After `_download_default_weights` moves the checkpoint into place it is
+  hashed with `provenance.hash_bytes` and compared against the
+  `MACE_MP0_MEDIUM_SHA256` anchor; a mismatch deletes the downloaded
+  file and raises with the expected/actual hashes and recovery guidance,
+  so a corrupt or substituted checkpoint can never be silently used.
+  The check deliberately covers only the *current* download: a cache
+  hit from a previous run (or the official mace helper) is returned
+  without verification, so existing working setups never break. The
+  anchor is currently `None` -- the implementation environment could not
+  reach the release asset on 2026-10-31 (proxy refused the object-store
+  tunnel), and a hash is only ever recorded from a genuine download,
+  never hand-entered. Until a trusted environment fills it, the check
+  skips gracefully and behaviour is unchanged; the fill procedure is
+  documented beside the constant.
+
 ## [0.5.0] - 2026-10-30
 
 **This release changes the numbers a (110) build produces.** Read "Changed"
