@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The film no longer lands exactly on top of the substrate on (111).**
+  Assembly had no in-plane placement step, so the lateral registry was
+  whatever the slab cut left behind: `n_Cu mod 3` decided whether the
+  film's joining layer coincided with the substrate's top layer, and when
+  it did the interface began on a symmetry-locked stationary point that
+  relaxation could not leave — γ_int came out about 11× too large on
+  Cu/Ni(111). It was periodic, not a single value: it occurred at
+  `--min-thickness` 8.0, 13.0/14.0/14.4 and 19.0/20.0 Å. The builder now
+  shifts the film in-plane by the substrate's own stacking vector when,
+  and only when, the as-built join is exactly opposed. (001) and (110)
+  build bit-identically, and the cell never changes.
+- **The non-(001) registry warning no longer quotes 0.081 / 0.898 / 11×.**
+  That sequence was a symptom of the defect above and is no longer
+  reproducible. The warning now states what is still true: the registry is
+  inherited from the two slab cuts, is never scanned across candidate
+  sites, and there is no configuration field to request one.
+- The (111)/(110) validation archive is marked as partially superseded: its
+  on-top value 0.8980 J/m² is a pre-fix record that current code does not
+  reproduce, and it has not been re-measured. The 0.5953 J/m² (110) ridge
+  value still reproduces — (110) was deliberately left untouched.
+
 ## [0.4.0] - 2026-10-30
 
 Closes the non-(001) gap: orientations other than (001) now build correct
