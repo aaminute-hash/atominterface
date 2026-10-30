@@ -194,6 +194,7 @@ Physical invariance tests are first-class:
 | How were these numbers validated? | [`docs/validation_cu_ni_001.md`](docs/validation_cu_ni_001.md) |
 | Raw data to reproduce it myself | [`docs/validation/cu_ni_001_multi_candidate/`](docs/validation/cu_ni_001_multi_candidate/) |
 | Raw data for the (111) and (110) orientations | [`docs/validation/cu_ni_multi_orientation/`](docs/validation/cu_ni_multi_orientation/) |
+| Which lateral site does the film sit on? | [`docs/design/registry_field.md`](docs/design/registry_field.md) |
 | Contributing (read the testing rule before you write a mock) | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
 One caveat worth repeating: **γ_int from the shipped defaults is biased by about
@@ -208,6 +209,11 @@ that is in the validation note.
 | 0.2 | Charge balance / polar termination handling | shipped (v0.2.0) |
 | 0.3 | Interface thermodynamics on a real system (Cu/Ni) | shipped (v0.3.0) |
 | 0.4 | MD → stress/strain → FEniCSx constitutive pipeline | planned |
+| 0.5 | Named lateral registry of the join — breaking on (110) | shipped (v0.5.0) |
+
+Phase 0.5 changed what (110) produces: the join is now *placed* on a named
+site instead of inheriting one, so γ_int(110) goes from 0.595 to 0.088 J/m².
+(001) is unaffected. See the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 See `docs/roadmap.md` for the detailed plan.
 
