@@ -64,17 +64,25 @@ shown to be independent of the entry point (initial gap 2.0 → 2.4 Å moves
   in-plane period were all wrong on (111)/(110) — Cu(111) reported
   3.2671 Å² against a true 5.6587 Å². (001) comes out bit-identical
   across the fix.
-- **A design gap, still open: the initial lateral registry is a function
-  of `--min-thickness`**, and every registry is a symmetry-locked
-  stationary point that a relaxation never leaves. On Cu/Ni(111) the
-  thickness steps 10.8 / 14.4 / 18.0 / 21.6 Å start at fcc-hollow /
-  on-top / fcc-hollow / hcp-hollow and give γ_int 0.081 / 0.898 / 0.081 /
-  0.081 — an 11× jump from the thickness knob alone, which a reader of a
-  thickness scan would otherwise mistake for non-convergence. PR #25
-  downgrades this from *silently wrong* to *warned*: a non-(001) run now
-  warns that its registry has not been scanned, and prints the measured
-  lateral offset so two runs can be compared. **The registry problem
-  itself is not fixed** — the builder still does not sample registries.
+- **A design gap, found by PR #25 and fixed by PR #30.** The initial
+  lateral registry used to be a function of `--min-thickness`: on
+  Cu/Ni(111) the thickness steps 10.8 / 14.4 / 18.0 / 21.6 Å started at
+  fcc-hollow / on-top / fcc-hollow / hcp-hollow and gave γ_int 0.081 /
+  0.898 / 0.081 / 0.081 — an 11× jump from the thickness knob alone,
+  which a reader of a thickness scan would otherwise mistake for
+  non-convergence. The cause was not a wrong calculation but a missing
+  one: assembly had no in-plane placement step at all, so the registry
+  was whatever the slab cut left behind, and `n_Cu mod 3` decided whether
+  that happened to be exactly on-top. It is **periodic, not one unlucky
+  value** — it recurs at 8.0, 13.0/14.0/14.4 and 19.0/20.0 Å. PR #30 now
+  moves the film off an exactly opposed join by the substrate's own
+  stacking vector; (001) and (110) build bit-identically and the cell
+  never changes. The archived 0.898 is therefore a pre-fix record — see
+  the archive's `superseded` notice.
+  **What is still missing is the ability to *request* a site**: there is
+  no `registry` field on the config, so a user cannot ask for fcc-hollow
+  instead of accepting the default. That gap is why the non-(001) warning
+  still exists.
 
 Both orientation archives carry the same caveat: (111) and (110) have
 **no DFT cross-check** — every number there has exactly one source
