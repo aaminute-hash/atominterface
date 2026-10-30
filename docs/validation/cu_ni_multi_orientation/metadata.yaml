@@ -6,17 +6,26 @@ title: Cu/Ni(111) 与 Cu/Ni(110) 界面形成能验证（非 (001) 取向）
 status: 定稿（γ_int 由显式注册扫描定稿）；无 DFT 交叉验证，全部数值待独立复核
 superseded:
   scope: partial
-  what: (111)@14.4 Å 的 on-top γ_int = 0.8980 J/m²
+  what: >-
+    (111)@14.4 Å 的 on-top γ_int = 0.8980 J/m²，
+    以及 (110) 的脊位 γ_int = 0.5954 / 0.5952 / 0.5953 J/m²（10.8 / 14.4 / 18.0 Å）
   reason: >
     PR #30 之后，builder 会把恰好对顶的 film 沿衬底自身的堆垛矢量移开，
     该配置的初始注册不再是 on-top，因此 0.898 不再由当前代码产生。
+    v0.5.0 之后（registry 字段，默认 "auto"），(110) 的初始注册也不再是脊位
+    而是槽位（衬底堆垛接续位点），因此 0.5954 / 0.5952 / 0.5953 也不再由
+    默认配置产生。两者的复现方式不同：0.898 须显式 registry="on-top"，
+    (110) 脊位须显式 registry=None 或 registry=(0.5, 0.0)。
   remeasured_after_fix: true
   remeasured_record: on_top_remeasured.md
   remeasured_value_J_m2: 0.0812    # 与 (111)@18.0 在同环境下给出同一个数
   unaffected:
     - 0.081  # (111) fcc 空位 @18.0/21.6 —— 构型在修复前后逐位相同
-    - 0.088  # (110) 槽位 —— PR #30 未触碰 (110)
-    - 0.5953 # (110) 脊位 —— 同上，仍可复现
+    - 0.088  # (110) 槽位 —— v0.5.0 起是默认值，不再是"扫描才有"
+  v050_note: >-
+    v0.5.0 起上两行是 registry="auto"（默认）直接给出的值。
+    失效模式本身没有被去掉：registry="on-top" 在 (111)@14.4 仍给 0.8980，
+    registry=(0.5, 0.0) 在 (110) 仍给 0.5952，两者仍是四点全绿的驻点。
 archived: 2026-10-30
 
 tool: atominterface
@@ -90,9 +99,11 @@ caveats:
       0.898 J/m²（(111)@14.4 Å on-top）与 0.5953 J/m²（(110) 脊位）不是数值，
       是对称性锁定的驻点假象。它们出现在文档与 CSV 中仅作为失效模式示例，
       标注为不可引用，不得当作界面能使用。
-      两者现状不同：0.5953 仍可复现（PR #30 未触碰 (110)）；0.898 已不可复现
-      （见 superseded），只能作为修复前的历史记录引用；
-      修复后的重测值为 0.0812 J/m²（见 on_top_remeasured.md）。
+      两者在 v0.5.0 起都不可由默认配置复现（见 superseded），只能作为历史记录
+      引用；0.898 的修复后重测值为 0.0812 J/m²（见 on_top_remeasured.md），
+      (110) 的默认输出为 0.0881 J/m²（槽位）。
+      v0.5.0 的 registry 字段请求的正是这一类位点，所以请求值同样不可引用：
+      registry="on-top" 与 registry=(0.5, 0.0) 给出的数就是上面两个数。
   - id: dz-two-conventions
     text: >
       dz 有两个口径：layer_dz（底层 Ni 层平均 z 减顶层 Cu 层平均 z）与
