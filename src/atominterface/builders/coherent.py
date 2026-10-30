@@ -150,15 +150,16 @@ def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
 
     Three things the caller cannot see from the output otherwise.
 
-    The registry is whatever the builder produced, and the builder makes
-    it a function of ``--min-thickness``: on Cu/Ni(111), 10.8 / 14.4 /
-    18.0 / 21.6 A start at fcc-hollow / on-top / fcc-hollow / hcp-hollow
-    and give gamma_int 0.081 / 0.898 / 0.081 / 0.081 J/m^2. Nothing
-    slides during relaxation -- every final registry was bit-identical to
-    its initial one -- so a jump across a thickness scan is the registry
-    changing, not the thickness failing to converge. That is a pure
-    artefact, and it reads exactly like the convergence failure it is
-    not.
+    The registry is not chosen, it is inherited: the two boards are
+    stacked with the lateral coordinates their slab cuts happen to carry
+    and only ever moved along the normal, so the join lands on whatever
+    pair of sublattices those cuts imply.  It is never scanned over
+    candidate sites, and there is no way to ask for one --
+    :class:`CoherentInterfaceConfig` has no ``registry`` field.  A film
+    that would land exactly on top of a substrate atom is now moved off
+    that site by the substrate's own stacking step, so the offset no
+    longer collapses to on-top as the thickness changes: what is left is
+    a single site, decided by the slicing rather than by the physics.
 
     The geometry gate cannot catch any of this and must not be stretched
     to: a non-(001) board can be level, conserve its area and keep a
@@ -193,15 +194,14 @@ def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
     )
     warnings.warn(
         f"[orientation] {' and '.join(off_001)}: this orientation is not (001), so the "
-        "lateral registry the builder hands over has not been scanned -- and it is a "
-        "function of --min-thickness rather than of anything physical. Measured on "
-        "Cu/Ni(111): 10.8 / 14.4 / 18.0 / 21.6 A start at fcc-hollow / on-top / "
-        "fcc-hollow / hcp-hollow and give gamma_int 0.081 / 0.898 / 0.081 / 0.081 "
-        "J/m^2, an 11x step from the thickness knob alone. No thickness slid away from "
-        "its starting registry during relaxation -- every final registry was "
-        "bit-identical to its initial one -- so a jump across a thickness scan is the "
-        "registry changing, not the thickness failing to converge; compare registries "
-        f"before reading anything into a thickness scan. {registry}"
+        "lateral registry the builder hands over has not been scanned: it is "
+        "inherited from the two slab cuts, never chosen among candidate sites, and "
+        "there is no configuration field to request one. A film that would sit "
+        "exactly on top of a substrate atom is now moved off that site by the "
+        "substrate's own stacking step, so the registry no longer collapses to "
+        "on-top as the thickness changes -- it is one site, decided by the slicing "
+        "rather than by the physics, and two runs still have to be checked for "
+        f"being on it before their gamma_int can be compared at all. {registry}"
         "The site itself is not a geometry violation: it is level, conserves its area "
         "and keeps a healthy in-plane period, but on a high-symmetry registry the "
         "in-plane gradient vanishes by symmetry, so a relaxation stops where it "
