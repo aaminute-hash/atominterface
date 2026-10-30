@@ -368,9 +368,13 @@ The three clusters collapse:
 Two independent observables shrink consistently — the γ_int range by
 ~25×, the E_interface-per-cell spread by ~22× — and the per-cluster
 shift tracks the residual force monotonically: the A cluster (18/36
-atoms, 53 steps, terminal |F|max 0.0099) moves −0.0050 J/m², the C
-cluster (72 atoms, 49 steps, 0.0090) moves −0.0006, the B cluster
-(54 atoms, 52 steps, 0.0077) barely moves. "The least-converged
+atoms, 53 steps, terminal |F|max 0.0099) drops 0.0050 J/m² (0.0617 →
+0.0567), the C cluster (72 atoms, 49 steps, 0.0090) drops 0.0006
+(0.0573 → 0.0567), the B cluster (54 atoms, 52 steps, 0.0077) barely
+moves. (Sign convention throughout this document: a positive difference
+means the default fmax = 0.01 batch sits above the converged
+fmax = 0.002 value, as in §3 above. The per-cluster numbers here are
+given as drops with both endpoints so the direction cannot be misread.) "The least-converged
 candidate falls the most" is the signature of residual convergence
 error, not of a physical split, model error, or a code bug. Relaxation
 steps went 49–53 → 71–75, none hitting `max_steps = 200`. γ_surf_Cu

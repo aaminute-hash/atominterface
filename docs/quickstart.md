@@ -167,3 +167,4 @@ python -m atominterface build --relax \
 | Something failed, or a result looks wrong | [`troubleshooting.md`](troubleshooting.md) |
 | How were these numbers validated, and against what? | [`validation_cu_ni_001.md`](validation_cu_ni_001.md) |
 | I want the raw data to reproduce it myself | [`validation/cu_ni_001_multi_candidate/`](validation/cu_ni_001_multi_candidate/) |
+| I want the (111)/(110) orientations | [`validation/cu_ni_multi_orientation/`](validation/cu_ni_multi_orientation/) |
