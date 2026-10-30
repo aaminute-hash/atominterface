@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def rotate_positions(positions, R):
@@ -13,8 +18,69 @@ def rotate_stress(stress, R):
     return R @ stress @ R.T
 
 
-def check_force_consistency(energy, forces, positions, delta=1e-3):
-    return 0.0
+def check_force_consistency(
+    energy_fn: Callable[[np.ndarray], float],
+    forces: np.ndarray,
+    positions: np.ndarray,
+    delta: float = 1e-3,
+) -> float:
+    """Largest deviation between given forces and the energy surface.
+
+    Computes ``max_i |F_i - (-dE/dr_i)|`` where ``-dE/dr_i`` is estimated
+    by a central finite difference of ``energy_fn`` along every Cartesian
+    direction of every atom.  The return value is the maximum absolute
+    force residual, in the same units as ``forces`` (eV/A when the energy
+    is in eV and positions in A).
+
+    Typical usage -- check that a model's forces really are the gradient
+    of its own energies::
+
+        check_force_consistency(
+            lambda r: calc.get_potential_energy(atoms.copy(), r),
+            calc_forces,
+            positions,
+        )
+
+    Threshold guidance (empirical, not a contract): a float32 uMLIP
+    typically shows residuals around 1e-2 eV/A; a float64 model or an
+    analytic potential should sit near 1e-6.  A residual far above the
+    expected scale means the forces and the energy do not come from the
+    same potential.
+
+    Args:
+        energy_fn: Receives an ``(N, 3)`` positions array, returns a
+            scalar energy.  It must not mutate the array it is given.
+        forces: The ``(N, 3)`` force array to verify (e.g. from a model).
+        positions: The ``(N, 3)`` coordinates at which the forces were
+            evaluated.  Never mutated: shifted copies are passed to
+            ``energy_fn``.
+        delta: Finite-difference step in the units of ``positions``.
+
+    Returns:
+        ``max_i |F_i - (-dE/dr_i)|``; ``0.0`` for empty input.
+
+    Note:
+        Signature changed in 0.5.1.  The old signature accepted an
+        ``energy`` scalar and returned a constant ``0.0`` -- it verified
+        nothing and had no real consumers.
+    """
+    f = np.asarray(forces, dtype=float)
+    r = np.asarray(positions, dtype=float)
+    if f.size == 0 or r.size == 0:
+        return 0.0
+
+    # Central difference per atom per Cartesian direction.  ``r.copy()``
+    # keeps the caller's array untouched, and a fresh copy per probe
+    # keeps a mutating ``energy_fn`` from contaminating later probes.
+    fd = np.zeros_like(r)
+    for i in range(r.shape[0]):
+        for a in range(3):
+            r_plus = r.copy()
+            r_minus = r.copy()
+            r_plus[i, a] += delta
+            r_minus[i, a] -= delta
+            fd[i, a] = (float(energy_fn(r_plus)) - float(energy_fn(r_minus))) / (2.0 * delta)
+    return float(np.max(np.abs(f + fd)))
 
 
 def check_stress_symmetry(stress):
