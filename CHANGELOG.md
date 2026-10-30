@@ -66,6 +66,18 @@
   skips gracefully and behaviour is unchanged; the fill procedure is
   documented beside the constant.
 
+### Documentation
+
+- `docs/roadmap.md` records two facts for the next cycle: the
+  `pydantic` dependency is declared in `pyproject.toml` but referenced
+  nowhere in `src/` (per the user decision the declaration stays, the
+  fact is recorded, and disposal is deferred to a release window), and
+  the monolith split candidates for `builders/coherent.py` (2700+
+  lines) and `builders/charge.py` (932 lines) with their cut lines --
+  including the one silent fallback in `coherent.py` (the single-match
+  rotation `suppress(Exception)`) that is deliberately left for that
+  split rather than widened in this cycle.
+
 ## [0.5.0] - 2026-10-30
 
 **This release changes the numbers a (110) build produces.** Read "Changed"

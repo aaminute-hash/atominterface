@@ -138,6 +138,19 @@ Deliverables:
 - Submit PRs / start Discussions in ase, pymatgen, matgl, torch-sim
 - Establish a citation format and a "paper using AtomInterface" list
 
+## Dependency facts (recorded 2026-10-31)
+
+**`pydantic` is declared but unreferenced.** `pyproject.toml` lists
+`pydantic>=1.10,<3` in `dependencies`, and a full grep of `src/` at this
+date finds zero imports of it anywhere in the package (tests neither).
+Per the user decision of this cycle (Q1) the declaration **stays** and
+this note is the record: it is a known fact, not an approved dependency.
+Disposal is deferred to the next version window's release-process
+cleanup -- and must be re-verified there (grep `src/` for `pydantic`
+again, in case new code has started using it in the meantime). The
+dependency range in `pyproject.toml` is frozen for this cycle and was
+not touched.
+
 ## Monolith split candidates (recorded 2026-10-31, next-cycle P1 candidates)
 
 Two modules have grown past the size where a single review can hold them,
