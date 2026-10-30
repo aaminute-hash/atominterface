@@ -337,7 +337,8 @@ fmax 效应会被 11 倍的注册误差淹没。
 
 **口径（所有数字共享，引用时必须带上）**
 
-- atominterface **0.3.0**，`examples/03_interface_energy.py`；MACE-MP-0 medium
+- atominterface 源码 @ **`c440b81`**（首发版 **v0.4.0**；该提交自报的
+  `__version__` 是 0.3.0，属版本字符串而非发布版），`examples/03_interface_energy.py`；MACE-MP-0 medium
   `sha256:01bfe2210013`；**float32**、CPU；`seed=0`。
 - 参考态 `strained-coherent`，`area_source=candidate.area`，真空 15 Å，
   初始 gap 2.0 Å，完整松弛**无预松弛**。
