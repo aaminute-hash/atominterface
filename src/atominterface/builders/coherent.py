@@ -131,6 +131,20 @@ PUBLISHED_MILLER: tuple[int, int, int] = (0, 0, 1)
 _STRAIN_TIE_DIGITS = 4
 
 
+#: z separations below this are the scatter inside one atomic plane rather
+#: than a step to the next one.  A built board is unrelaxed, so its planes
+#: are flat to ~1e-13; the tightest interplanar spacing the builder can
+#: produce is over an angstrom, three orders above this floor.
+_PLANE_Z_FLOOR = 1e-3
+
+#: A shift shorter than this is not applied at all.  ``+= 0.0`` is a no-op
+#: in exact arithmetic, but it is still a write -- and a write to every
+#: film coordinate is a chance to disagree with a pinned baseline in the
+#: last bit.  Skipping the operation entirely is what makes "this changed
+#: nothing" a structural guarantee instead of a floating-point one.
+_OFF_ON_TOP_MIN_SHIFT = 1e-12
+
+
 def _warn_unscanned_orientation(config, lateral: float | None = None) -> None:
     """Say out loud that a non-(001) run ships one unscanned registry.
 
@@ -1268,6 +1282,93 @@ def _prepare_stack(substrate_slab, film_slab, match, max_strain):
     return substrate_slab, film_slab, sub_2d, float(sub_mat[2, 2]), d_refs
 
 
+def _atomic_planes(z: np.ndarray) -> list[np.ndarray]:
+    """Indices of each atomic plane in ``z``, ordered from the bottom up.
+
+    Grouped by a tolerance read off the data itself (half the smallest
+    real z step) rather than a fixed constant: a plane is flat, so every
+    separation seen below :data:`_PLANE_Z_FLOOR` is scatter inside one
+    plane and the rest are steps between them.
+    """
+    order = np.argsort(z, kind="stable")
+    steps = np.diff(z[order])
+    real = steps[steps > _PLANE_Z_FLOOR]
+    tol = 0.5 * float(np.min(real)) if real.size else 0.0
+
+    planes: list[list[int]] = []
+    current = [int(order[0])]
+    reference = float(z[current[0]])
+    for index in order[1:]:
+        if float(z[index]) - reference > tol:
+            planes.append(current)
+            current = [int(index)]
+            reference = float(z[index])
+        else:
+            current.append(int(index))
+    planes.append(current)
+    return [np.asarray(plane, dtype=int) for plane in planes]
+
+
+def _off_on_top_shift(
+    sub_coords: np.ndarray, film_coords: np.ndarray, sub_2d: np.ndarray
+) -> np.ndarray:
+    """In-plane shift that lifts the film off an exactly opposed join (Å).
+
+    Stacking the boards as they come puts the film's join layer on
+    whatever sublattice pymatgen's cut left it on and the substrate's on
+    the one its own layer count implies -- on fcc (111) that is sublattice
+    ``(n_sub - 1) mod 3``, so every third ``--min-thickness`` step lands
+    the two on top of each other.  An exactly opposed stack sits on a
+    mirror-symmetric stationary point whose in-plane gradient vanishes by
+    symmetry, so a relaxation converges there and stays.  Measured on
+    Cu/Ni(111): 7 Cu layers at 14.4 A gives gamma_int 0.898 J/m^2 against
+    0.081 one thickness step either side.
+
+    The nudge is the substrate's own stacking step -- the in-plane
+    offset from its second plane to its top one -- so the film lands on
+    the site that continues the substrate's stacking sequence rather
+    than on an arbitrary fraction of a cell.  That is the one choice that
+    is defined by the geometry at hand and by nothing else.
+
+    Returns zeros when the join is already off the symmetric point, or
+    when either board has too few planes to say what "the next one up"
+    means.  The caller skips the shift instead of applying a zero one.
+    """
+    empty = np.zeros(2, dtype=np.float64)
+    if not len(sub_coords) or not len(film_coords):
+        return empty
+    sub_planes = _atomic_planes(sub_coords[:, 2])
+    film_planes = _atomic_planes(film_coords[:, 2])
+    if len(sub_planes) < 2 or not film_planes:
+        return empty
+
+    inv_2d = np.linalg.inv(np.asarray(sub_2d, dtype=np.float64))
+    sub_top = sub_coords[sub_planes[-1], :2] @ inv_2d
+    sub_below = sub_coords[sub_planes[-2], :2] @ inv_2d
+    film_bottom = film_coords[film_planes[0], :2] @ inv_2d
+
+    def _wrapped(delta: np.ndarray) -> np.ndarray:
+        return delta - np.round(delta)
+
+    # As-built registry of the join: the closest pair of in-plane offsets
+    # between the two facing planes, minimum image, in Å.  This is the
+    # same quantity ``_closest_cross_pair`` reports for the stack, just
+    # read before the stack exists.
+    lateral = min(
+        float(np.min(np.linalg.norm(_wrapped(sub_top - point) @ sub_2d, axis=1)))
+        for point in film_bottom
+    )
+    if lateral >= ON_TOP_LATERAL_TOL:
+        return empty
+
+    # Forward stacking step: from the nearest atom one plane down to an
+    # atom in the top plane.  Wrapped to the shortest representative so
+    # the film moves by one step and not by a lattice vector plus one.
+    offsets = np.asarray(_wrapped(sub_top[0] - sub_below) @ sub_2d, dtype=np.float64)
+    nearest = int(np.argmin(np.linalg.norm(offsets, axis=1)))
+    return np.asarray(offsets[nearest], dtype=np.float64)
+
+
 def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
     """Stack substrate and film slabs into one coherent interface.
 
@@ -1324,6 +1425,14 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
     # slabs were leveled by ``_orient_slab``.
     film_in_plane = np.asarray(film_slab.lattice.matrix, dtype=np.float64)[:2, :2]
     film_coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
+
+    # Off the symmetric point, if that is where the two cuts happened to
+    # meet.  In-plane only, and before anything touches z: the stacking
+    # step is read off the substrate's own planes, so it does not care
+    # where the film will end up along the normal.
+    shift = _off_on_top_shift(sub_coords, film_coords, sub_2d)
+    if float(np.linalg.norm(shift)) >= _OFF_ON_TOP_MIN_SHIFT:
+        film_coords[:, :2] += shift
 
     # Rebuild both cells with a clean z axis so the vacuum budget is exact.
     def _cell(in_plane, c):
