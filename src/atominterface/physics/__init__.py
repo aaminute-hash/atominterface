@@ -7,7 +7,9 @@ EV_A2_TO_J_M2 = 16.02176634
 J_M2_TO_EV_A2 = 1.0 / EV_A2_TO_J_M2
 
 EV_A3_TO_PA = 1.602176634e11
-EV_A3_TO_GPA = 160.21766208
+# Derived, not a second literal: the historical 160.21766208 disagreed with
+# EV_A3_TO_PA in the last four digits (the exact value is 160.2176634).
+EV_A3_TO_GPA = EV_A3_TO_PA / 1e9
 
 
 def ev_per_a3_to_gpa(val):

@@ -72,7 +72,9 @@ def dummy_calc_factory():
 # ------------------------------------------------------------------
 def test_ev_per_a3_gpa_roundtrip():
     val = 1.0  # eV/A^3
-    assert abs(ev_per_a3_to_gpa(val) - 160.21766208) < 1e-6
+    # 0.5.1 derives EV_A3_TO_GPA from EV_A3_TO_PA / 1e9 = 160.2176634
+    # (the old literal 160.21766208 had drifted from the Pa constant).
+    assert abs(ev_per_a3_to_gpa(val) - 160.2176634) < 1e-6
     back = gpa_to_ev_per_a3(ev_per_a3_to_gpa(val))
     assert abs(back - 1.0) < 1e-9
 

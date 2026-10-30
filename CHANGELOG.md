@@ -34,6 +34,19 @@
   documented in the docstring). `build_meta()` now fills `seed` from it
   when no explicit seed is passed, so `metadata.yaml` always records the
   randomness a run actually used.
+- **`EV_A3_TO_GPA` can no longer drift from `EV_A3_TO_PA`.** The two
+  constants were independent literals in the same file and had already
+  disagreed in their last four digits (160.21766208 vs the 160.2176634
+  implied by the exact 1.602176634e11 Pa). `EV_A3_TO_GPA` is now derived
+  as `EV_A3_TO_PA / 1e9`, so a single truth feeds both. The top level no
+  longer keeps its own copy of any physics constant either:
+  `atominterface.*` constants are forwards of `atominterface.physics.*`
+  by identity (verified by test), and the top-level `__all__` now covers
+  the full physics export surface (`rotation_matrix`, `transform_forces`,
+  `transform_stress_voigt`, `ANG_TO_BOHR`, `ev_per_a3_to_gpa`,
+  `gpa_to_ev_per_a3`, ...). Numeric impact of the drift fix is e-8 in
+  relative terms and only meaningful in the same environment
+  (float-identity conclusions are environment-bound as always).
 
 ## [0.5.0] - 2026-10-30
 
