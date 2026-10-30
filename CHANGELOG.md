@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.1] - 2026-10-30
+
+A patch release, and it ships two things: the (111) on-top fix itself, which
+changed numerical output and had been sitting on `main` unreleased, and the
+measurement of what that fix is actually worth.
 
 ### Fixed
 
@@ -22,8 +26,36 @@
   sites, and there is no configuration field to request one.
 - The (111)/(110) validation archive is marked as partially superseded: its
   on-top value 0.8980 J/m² is a pre-fix record that current code does not
-  reproduce, and it has not been re-measured. The 0.5953 J/m² (110) ridge
-  value still reproduces — (110) was deliberately left untouched.
+  reproduce. The 0.5953 J/m² (110) ridge value still reproduces — (110) was
+  deliberately left untouched.
+
+### Validation
+
+- **The superseded value was re-measured: 0.8981 → 0.0812 J/m²** on Cu/Ni(111)
+  at 14.4 Å. One re-run cannot answer this, because the archive was produced
+  with mace-torch 0.3.17 / pymatgen 2026.10.24 and re-running today would
+  change the code and the environment together. Both arms share one process and
+  one protocol and differ only in that the pre-fix arm replaces
+  `_off_on_top_shift` with a zero-valued function. The control arm reproduces
+  the archived 0.8981 and its surface terms (1.2994 / 1.8237 J/m²), and 18.0 Å
+  builds bit-identically under both arms — `E_interface` agrees to six decimals
+  — so the 14.4 Å delta is attributable to the shift alone. The arithmetic
+  closes: ΔE_interface = −0.288513 eV over 5.658707 Å² is 0.8169 J/m², and
+  0.8981 − 0.0812 = 0.8169. Recorded in
+  `docs/validation/cu_ni_multi_orientation/on_top_remeasured.md`.
+- **The site is confirmed independently of the number.** Post-fix the joining
+  layer sits at fractional (+1/3, +1/3), 1.4758 Å from on-top and 0.0000 Å from
+  the ideal position, with a void in the plane immediately below it: the fcc
+  hollow, the same offsets the archive's own four-site scan records at 18.0 Å.
+- **One limit is recorded rather than left implicit:** the film does not move
+  in plane in either arm, because a hollow is also a three-fold stationary
+  point. This fixes the *starting placement*, not the search — which is why
+  `CoherentInterfaceConfig` still has no `registry` field and a user still
+  cannot ask for a site.
+- The 14.4 Å fmax comparison that was skipped because the on-top lock would
+  have swamped it has now been run: 0.002 → 0.0812, 0.01 → 0.0817 J/m², a
+  difference of +0.0005 — an order of magnitude below the (001) cluster's
+  +0.0050 and three below the 0.817 the registry defect was worth.
 
 ## [0.4.0] - 2026-10-30
 
