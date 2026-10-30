@@ -137,9 +137,35 @@ cd F:/tmp/wt-111b && PYTHONPATH=F:/tmp/wt-111b/src F:/tmp/venv-ledger/Scripts/py
 ```
 
 (001) 的 fmax 0.002 侧为 `orient_001/t001/`（同协议，只把 `--fmax` 改回 0.002）。
-**(111) 的 14.4 Å 档不做 fmax 对照**——它被 on-top 锁死，fmax 效应会被 11 倍的
-注册误差淹没。（**该理由已失效**：PR #30 之后 14.4 Å 不再落在 on-top，见
-`metadata.yaml` 的 `superseded`。此档仍未做 fmax 对照，但已不再有这个理由。）
+**(111) 的 14.4 Å 档原计划不做 fmax 对照**——它被 on-top 锁死，fmax 效应会被
+11 倍的注册误差淹没。（**该理由已失效**：PR #30 之后 14.4 Å 不再落在 on-top，
+见 `metadata.yaml` 的 `superseded`。该档的 fmax 对照**已补做**：0.002 →
+0.0812、0.01 → 0.0817 J/m²，差 +0.0005，见 `on_top_remeasured.md` §6。）
+
+### 1.6 修复前后 A/B（(111)@14.4 重测，2026-10-30 补）
+
+同一份源码（`main` @ `e01476491`）、同一进程、同一协议，只把
+`_off_on_top_shift` 换成长度为零的版本，用来把"代码变了"与"环境变了"分开。
+
+```python
+import numpy as np
+import atominterface.builders.coherent as coh
+coh._off_on_top_shift = lambda *a, **k: np.zeros(2)   # A 臂 = 修复前行为
+```
+
+然后照常调用 `examples/03_interface_energy.py` 的 `main(argv)`，参数与 §1.1 相同。
+`dtype` **不要**显式给：默认 `float32` 与归档一致。
+
+| 厚度 | 臂 | γ_int (J/m²) |
+|---|---|---|
+| 14.4 | pre-fix | 0.8981 |
+| 14.4 | post-fix | **0.0812** |
+| 18.0 | pre-fix | 0.0812 |
+| 18.0 | post-fix | 0.0812 |
+
+18.0 档两臂 `E_interface` 到 6 位小数相同（−87.046448），说明修复在非 on-top
+族上是恒等变换；14.4 档只变 `E_interface`（−0.288513 eV），表面项与体相参考
+两臂逐位相同。完整数据见 `on_top_remeasured.csv`。
 
 ---
 
