@@ -1,5 +1,129 @@
 # Changelog
 
+## [0.5.0] - 2026-10-30
+
+**This release changes the numbers a (110) build produces.** Read "Changed"
+before upgrading: every γ_int you have computed on (110) with 0.4.1 or
+earlier moves, and the old values are now reachable only on request.
+
+### Added
+
+- **A `registry` field that names the lateral site of the join.**
+  `CoherentInterfaceConfig.registry` (and `--registry` on `atominterface
+  build`) accepts `"auto"` (default), `"on-top"`, `"hcp"`, an explicit
+  `(u, v)` in-plane fractional offset (CLI: `--registry 0.5,0.5`), or
+  `None`. The join is now *placed on* a site instead of inheriting
+  whatever the two slab cuts left behind. Placement is targeted: the
+  site is named first, and the translation that reaches it is solved for
+  (`shift = d − target`), not added incrementally.
+- **Three-part provenance for the placement.** Every candidate carries
+  `registry_requested` (what you asked for), `registry_target_frac` (what
+  that resolved to, in fractional coordinates) and
+  `registry_as_built_frac` / `registry_as_built_lateral_A` (what the
+  builder actually produced). `registry_lateral_offset_ang` is unchanged
+  and still consumed downstream. A request and its result are separate
+  fields on purpose: collapsing them hides a request that was not
+  honoured.
+- **`measure_registry(atoms)`**, public, re-measures the join site of a
+  relaxed or re-read structure carrying the `SLAB_ID` array. After
+  relaxation the CLI writes `registry_final_frac` /
+  `registry_final_lateral_A` beside the relax record, so "it relaxed
+  away from the site I asked for" is a readable fact rather than
+  something a lateral distance has to be guessed from.
+- **A placement self-check.** After the film is moved the join is
+  re-measured and compared with the request in fractional coordinates;
+  a miss beyond `REGISTRY_PLACEMENT_TOL` (1e-6) raises `ValueError`
+  naming the requested site, the actual site, the deviation and the
+  sites that exist on that surface. A site that cannot be *measured*
+  raises too — it never falls back silently to the as-built position.
+
+### Changed
+
+- **The default is `registry="auto"`, and on (110) it moves the film.**
+  `auto` asks for the site that continues the substrate's own stacking
+  sequence. Measured on Cu/Ni:
+
+  | orientation | as-built site (`registry=None`) | `auto` target | effect |
+  |---|---|---|---|
+  | (001) 10.8/14.4/18.0/21.6 Å | (0, −½), 1.8075 Å | (0, +½) — the same site | **no move, all four thicknesses** |
+  | (111) 10.8/14.4/18.0 Å | fcc hollow (−⅓, −⅓), 1.4758 Å | (−⅓, −⅓) | no move |
+  | (111) 21.6 Å | hcp hollow (+⅓, +⅓), 1.4758 Å | fcc hollow (−⅓, −⅓) | moves 1.4758 Å |
+  | (110) 10.8/14.4/18.0/21.6 Å | ridge (½, 0), 1.8075 Å | trough (½, ½), 2.2137 Å | moves 1.2781 Å |
+
+  The fractions are what `registry_as_built_frac` reports, and they are
+  read before relaxation. **Which physical site a given `(u, v)` names
+  depends on the slab, not only on the surface**: on (111) the cut lands
+  on the fcc hollow at 10.8/14.4/18.0 Å and on the hcp hollow at 21.6 Å,
+  so `(u, v) = (⅓, ⅓)` is *hcp* here while `(−⅓, −⅓)` is *fcc*. That is
+  why the vocabulary has no site names — `auto` and `hcp` resolve the
+  site from the board's own stacking, and a `(u, v)` is a fraction you
+  have to have measured, not a name you can carry between slabs.
+
+  **(001) is bit-identical across this change** — verified with
+  `np.array_equal` on all four thicknesses, not with `allclose`. It is
+  the only orientation this project has a DFT cross-check for, and it
+  had to stay untouched.
+- **Every (110) number from 0.4.1 and earlier changes.** The as-built
+  (110) ridge site reads γ_int 0.5952 J/m²; the trough that `auto` now
+  asks for reads 0.0881 J/m², 6.8× lower and the scanned minimum of
+  `docs/validation/cu_ni_multi_orientation/registry_110_placement.md`.
+  If you need the old numbers, ask for them: `registry=None` reproduces
+  the 0.4.1 cut verbatim and `(0.5, 0.0)` names the ridge.
+- **The non-(001) warning now names the site you asked for.** It used to
+  say the registry was inherited from the slab cuts and that there was
+  no configuration field to request one; that half is no longer true.
+  The warning still fires, and still must: requesting one site is not a
+  scan of the others, and only `registry="scan"` would retire it.
+
+### Fixed
+
+- **The in-plane placement extrapolated instead of aiming.** v0.4.1's
+  `_off_on_top_shift` *added* the substrate stacking step to whatever
+  the cut produced, which is correct only where the cut leaves the film
+  on a sublattice site. It is right on fcc(111) (on-top + step = fcc
+  hollow) and wrong on fcc(110), where the cut leaves the film on the
+  ridge and ridge + step = short bridge: γ_int 0.5952 → 1.5189 J/m²,
+  2.55× *worse* than the defect it was fixing, still `valid=True`, still
+  converged. Targeted placement gives 0.0881 on the same board.
+- **A cartesian in-plane difference was being wrapped as if it were
+  fractional.** Wrapping is only meaningful after converting with
+  `inv(sub_2d)`; on a non-cubic surface lattice the shortcut does not
+  raise, it places the film 0.31 of a cell away from the requested site
+  with every downstream check green.
+
+### Validation
+
+- **`registry` reproduces the archive's own four-site scan.** Cu/Ni(110)
+  at 14.4 Å, MACE-MP-0, the protocol of
+  `docs/validation/cu_ni_multi_orientation` (vacuum 15 Å, fmax 0.002,
+  400 steps, 1 candidate). Every column is a value the archive measured
+  independently, by shifting the film by hand:
+
+  | `--registry` | site | E_interface (eV) | γ_int (J/m²) | archive |
+  |---|---|---|---|---|
+  | `none` | ridge | −115.0994 | 0.595 | −115.099365 / 0.5952 |
+  | `0,0.5` | short bridge | −114.5666 | 1.519 | −114.566643 / 1.5189 |
+  | `auto` | trough | −115.3919 | 0.088 | −115.391869 / 0.0881 |
+  | `on-top` | on-top | −114.2700 | 2.033 | −114.270020 / 2.0332 |
+
+  `auto` lands on the scanned minimum, not merely on a different site.
+- **`(111)` at 18.0 Å: `auto` gives −87.0464 eV**, the same number the
+  archive records for the fcc hollow, and `hcp` gives −87.0465 eV —
+  lower by 1e-4 eV, the direction the archive's 0.0810 vs 0.0812 J/m²
+  implies. The two hollows are 1.4758 Å from a substrate atom either
+  way, so a lateral distance cannot tell them apart; site labels were
+  assigned from the board's own plane geometry (an atom directly below
+  the join in the second plane is hcp, in the third is fcc).
+- **`(111)` at 21.6 Å is the thickness that used to start on hcp** and
+  now starts on fcc, which is what makes `--min-thickness` a single
+  variable again.
+
+### Not implemented
+
+- `registry="scan"` — the explicit enumeration of every site of the
+  surface, which is what would actually retire the non-(001) warning.
+  The name is reserved and rejected with a message saying so.
+
 ## [0.4.1] - 2026-10-30
 
 A patch release, and it ships two things: the (111) on-top fix itself, which
@@ -23,11 +147,14 @@ measurement of what that fix is actually worth.
   That sequence was a symptom of the defect above and is no longer
   reproducible. The warning now states what is still true: the registry is
   inherited from the two slab cuts, is never scanned across candidate
-  sites, and there is no configuration field to request one.
+  sites, and there is no configuration field to request one. (The last
+  clause is only true of 0.4.1: v0.5.0 adds the `registry` field and the
+  warning names the requested site.)
 - The (111)/(110) validation archive is marked as partially superseded: its
   on-top value 0.8980 J/m² is a pre-fix record that current code does not
-  reproduce. The 0.5953 J/m² (110) ridge value still reproduces — (110) was
-  deliberately left untouched.
+  reproduce. Its 0.5953 J/m² (110) ridge value still reproduced here —
+  (110) was deliberately left untouched — but **v0.5.0 supersedes it too**,
+  so the archive now records both as reachable only on request.
 
 ### Validation
 
@@ -51,7 +178,9 @@ measurement of what that fix is actually worth.
   in plane in either arm, because a hollow is also a three-fold stationary
   point. This fixes the *starting placement*, not the search — which is why
   `CoherentInterfaceConfig` still has no `registry` field and a user still
-  cannot ask for a site.
+  cannot ask for a site. (Superseded in v0.5.0, which lets a user name a
+  site. What v0.5.0 still does not do is the *search*: `registry="scan"`
+  is reserved, not implemented.)
 - The 14.4 Å fmax comparison that was skipped because the on-top lock would
   have swamped it has now been run: 0.002 → 0.0812, 0.01 → 0.0817 J/m², a
   difference of +0.0005 — an order of magnitude below the (001) cluster's

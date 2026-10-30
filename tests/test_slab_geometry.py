@@ -599,8 +599,9 @@ def test_non_001_orientation_warns_that_the_registry_was_never_scanned(miller):
     a healthy in-plane period while sitting on a high-symmetry registry.
     That site has no geometry defect -- its in-plane gradient vanishes by
     symmetry, so the relaxation simply stops where it started, converged
-    and green and wrong.  Measured on Cu/Ni(110): the default ridge site
-    reads gamma_int = 0.5953 J/m^2 against a scanned 0.088.
+    and green and wrong.  Measured on Cu/Ni(110): the ridge site reads
+    gamma_int = 0.5953 J/m^2 against a scanned 0.088, which is why the
+    site a run ships has to be named at all.
     """
     config = CoherentInterfaceConfig(
         substrate_miller=miller, film_miller=miller, relax_terminations=False
@@ -628,16 +629,24 @@ def test_non_001_orientation_warns_that_the_registry_was_never_scanned(miller):
     # longer was measured not to help, so the message has to say so.
     assert "900 steps" in message
 
-    # The registry is inherited from the slab cuts, not scanned over
-    # candidate sites, and there is no config field to request one.  That
-    # is the gap that remains and the reason the warning exists at all.
+    # A site can be requested now, and the join has been built on the one
+    # that was asked for. The old message's two halves -- "the registry is
+    # inherited from the two slab cuts" and "there is no configuration
+    # field to request one" -- are no longer true, so they are asserted
+    # *absent* rather than dropped: a message that reclaims them would
+    # otherwise pass every other assertion in this test.
+    assert "inherited from the two slab cuts" not in message
+    assert "no configuration field to request one" not in message
     assert "has not been scanned" in message
-    assert "inherited from the two slab cuts" in message
-    assert "no configuration field to request one" in message
-    # ...and what changed: a film that would sit on top is moved off, so
-    # the registry no longer collapses to on-top as the thickness moves.
-    # Pinned because a message that kept describing the old defect would
-    # still pass every other assertion here.
+    assert "the join has been built on that site" in message
+    assert "one requested site is not a scan" in message
+    # ...and the part the request cannot do for you: the other sites are
+    # still unvisited, and only a real scan would visit them.
+    assert "does not lift this warning" in message
+    # ...and what still holds: a film that would sit on top is moved off,
+    # so the registry no longer collapses to on-top as the thickness
+    # moves. Pinned because a message that kept describing the old defect
+    # would still pass every other assertion here.
     assert "no longer collapses to" in message
 
     # The one number that makes two non-(001) runs comparable at all: the

@@ -79,13 +79,14 @@ shown to be independent of the entry point (initial gap 2.0 → 2.4 Å moves
   stacking vector; (001) and (110) build bit-identically and the cell
   never changes. The archived 0.898 is therefore a pre-fix record — see
   the archive's `superseded` notice.
-  **What is still missing is the ability to *request* a site**: there is
-  no `registry` field on the config, so a user cannot ask for fcc-hollow
-  instead of accepting the default. That gap is why the non-(001) warning
-  still exists.
+  **That gap is closed as of v0.5.0**: `CoherentInterfaceConfig.registry`
+  names a site — `auto` / `on-top` / `hcp` / `(u, v)` — and the builder
+  places the join *on* it rather than shifting it *by* a step. The
+  non-(001) warning still exists and still has to: requesting one site is
+  not a scan of the others.
 
-  A design for that field exists now — `docs/design/registry_field.md` —
-  and it is **not** a matter of widening the PR #30 shift. Measured on
+  The design for that field is `docs/design/registry_field.md`, and it is
+  **not** a matter of widening the PR #30 shift. Measured on
   Cu/Ni(110) at 14.4 Å: the as-built join sits on the ridge, and adding
   the substrate's stacking step to it lands the film on the short bridge,
   γ_int **1.5189** against the ridge's 0.5952 — 2.55× worse, still
@@ -96,10 +97,14 @@ shown to be independent of the entry point (initial gap 2.0 → 2.4 Å moves
   happen to coincide, on (110) they do not. Evidence:
   `docs/validation/cu_ni_multi_orientation/registry_110_placement.md`.
 
-  **Open decision, not yet taken:** whether the (110) default should
-  change at all. Doing so moves every (110) number from 0.5952 to 0.0881
-  and turns the archived ridge rows into pre-fix records. The design
-  recommends it and says why; it is not implemented.
+  **(110) default: taken, and changed in v0.5.0.** Every (110) number now
+  moves from 0.5952 to 0.0881 and the archived ridge rows are pre-fix
+  records; `registry=None` is the way to ask for the 0.4.1 cut back.
+
+  **Still open:** `registry="scan"` (§10 of the design) — the explicit
+  enumeration of every site of the surface, which is the only thing that
+  would retire the non-(001) warning. v0.5.0 reserves the name and
+  rejects it.
 
 Both orientation archives carry the same caveat: (111) and (110) have
 **no DFT cross-check** — every number there has exactly one source

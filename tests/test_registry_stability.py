@@ -22,6 +22,8 @@ These tests pin three things:
 * the shift helper itself fires on exactly one layer-count family.
 
 No MLIP is involved: everything here is decided during construction.
+
+The registry: these cases pin the as-built path, not the requested one.
 """
 
 from __future__ import annotations
@@ -69,9 +71,20 @@ def _fcc(species: str, a: float):
 
 
 def _build(miller, min_thickness):
-    """First candidate of a Cu/Ni interface at ``miller`` and ``min_thickness``."""
+    """First candidate of a Cu/Ni interface at ``miller`` and ``min_thickness``.
+
+    ``registry=None`` is pinned deliberately: every case in this file is
+    a statement about what the v0.4.1 assembly produced, and keeping it
+    available is the only way those statements stay checkable now that
+    the default asks for a site. The default's own behaviour has its own
+    file (``test_registry_field.py``) -- mixing the two here would turn
+    a regression in one into a confusing failure in the other.
+    """
     config = CoherentInterfaceConfig(
-        substrate_miller=miller, film_miller=miller, min_thickness=min_thickness
+        substrate_miller=miller,
+        film_miller=miller,
+        min_thickness=min_thickness,
+        registry=None,
     )
     builder = CoherentInterfaceBuilder(
         substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config

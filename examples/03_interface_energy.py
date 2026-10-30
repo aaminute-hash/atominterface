@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import sys
 import warnings
 from dataclasses import dataclass
@@ -321,6 +322,44 @@ class EnergyLedger:
         }
 
 
+def _parse_registry(value: str) -> str | tuple[float, float] | None:
+    """Resolve ``--registry`` to what :class:`CoherentInterfaceConfig` takes.
+
+    Mirrors ``atominterface.builders.coherent``'s vocabulary: a mode name,
+    an explicit ``u,v``, or ``none`` for ``registry=None`` -- the pre-0.5.0
+    behaviour, kept reachable so a number quoted from an older release can
+    still be reproduced on purpose.  Site names (``trough``, ``ridge``,
+    ``fcc-hollow``) are absent on purpose: which name means which fractional
+    offset is orientation- and lattice-specific.
+    """
+    from atominterface.builders.coherent import REGISTRY_MODES
+
+    text = value.strip()
+    if text == "none":
+        return None
+    if "," in text:
+        parts = [part.strip() for part in text.split(",")]
+        if len(parts) != 2:
+            raise argparse.ArgumentTypeError(
+                f"--registry expects two comma-separated fractions, e.g. 0.5,0.5; got {value!r}"
+            )
+        try:
+            parsed = (float(parts[0]), float(parts[1]))
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"--registry components must be numbers; got {value!r}"
+            ) from None
+        if not all(math.isfinite(item) for item in parsed):
+            raise argparse.ArgumentTypeError(f"--registry components must be finite; got {value!r}")
+        return parsed
+    if text not in REGISTRY_MODES:
+        raise argparse.ArgumentTypeError(
+            f"--registry must be one of {', '.join((*REGISTRY_MODES, 'none'))} "
+            f"or an explicit u,v (e.g. 0.5,0.5); got {value!r}"
+        )
+    return text
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the demo's command line (mirrors ``atominterface build``)."""
     parser = argparse.ArgumentParser(
@@ -379,6 +418,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--vacuum", type=float, default=15.0, help="vacuum padding in A.")
+    parser.add_argument(
+        "--registry",
+        default="auto",
+        help=(
+            "lateral registry of the join: 'auto' (the site that continues the "
+            "substrate's own stacking sequence), 'on-top', 'hcp', an explicit "
+            "'u,v' fractional offset such as 0.5,0.5, or 'none' for the pre-0.5.0 "
+            "behaviour (the join stays where the two slab cuts leave it). "
+            "Default %(default)s. Naming a site is not a scan over sites: for a "
+            "non-(001) orientation the other sites stay unvisited."
+        ),
+    )
     parser.add_argument("--max-candidates", type=int, default=1, help="keep at most N candidates.")
     parser.add_argument(
         "--sub-miller",
@@ -688,6 +739,11 @@ def _build_candidates(substrate, film, args: argparse.Namespace):
         min_thickness_film=args.min_thickness_film,
         vacuum_thickness=args.vacuum,
         max_candidates=args.max_candidates,
+        # ``getattr`` and not ``args.registry``: ``_build_candidates`` is also
+        # called with a hand-built Namespace, which carries only the fields
+        # the caller cared about. The default is the CLI's default, so the
+        # two paths cannot disagree about what a plain run asks for.
+        registry=_parse_registry(getattr(args, "registry", "auto")),
     )
     builder = CoherentInterfaceBuilder(substrate=substrate, film=film, config=config)
     return builder.build(), config
