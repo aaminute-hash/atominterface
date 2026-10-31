@@ -15,7 +15,7 @@
 6. 等价性结论必须带"仅同环境成立"限定；坐标基线不要硬编码（pymatgen/numpy 版本敏感），用同进程 A/B + `array_equal` 证明
 7. VASP 能量差值统一用 `energy(sigma->0)`，不混用 `free energy TOTEN`
 8. 分数坐标换算：先取分数坐标 → 回绕 → 再乘回笛卡尔；判据是实测落点不是能量
-9. **严禁把 ASE 的旋转（如 ZSL match.rotation）直接喂入 physics/invariants.py 的 helper**：`rotation_matrix(axis,θ)` 实际返回 R(−θ)（四元数向量负号，潜伏 bug 待单独修复），与 ASE 手性相反
+9. **旋转约定（0.5.2 起已统一）**：`rotation_matrix(axis,θ)` 现在返回与 ASE 同手性的标准右手矩阵（`R @ v` 列向量语义）；`rotate_positions`/`transform_forces`/`transform_stress_voigt` 用行向量 `X @ R.T`。**ASE 的旋转（如 ZSL `match.rotation`）现在可以安全喂入这些 helper**。旧版（≤0.5.1）因四元数向量负号返回 R(−θ)，与 ASE 手性相反——若看到旧代码里手动转置 `R.T` 补偿，那是为绕开该 bug，应予删除
 10. **禁止用 extxyz 文件哈希当回归闸门**：弛豫产物跨运行不可逐位复现（float32+多线程，~5e-6 Å 抖动）；要证"改动 X 不影响 Y"比未弛豫 built 结构（逐位 0.000）或能量/γ 数值差
 11. git 传输可能被代理挡（502/schannel）→ 推送/建 PR 走 GitHub REST API（`git credential fill` 取 token）
 12. 不臆造哈希/数值：MACE 权重锚点等只能取自真实下载文件的计算值，取不到就置 None 并注明
