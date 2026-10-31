@@ -49,8 +49,14 @@ def test_download_verifies_sha256_and_rejects_mismatch(fake_cache, monkeypatch):
 
 
 def test_download_skips_verification_when_anchor_unset(fake_cache, monkeypatch):
-    """Anchor None: the pre-verification behaviour (download succeeds)."""
-    assert mace_module.MACE_MP0_MEDIUM_SHA256 is None  # current state of the anchor
+    """Anchor None: the pre-verification behaviour (download succeeds).
+
+    The shipped default is a real hash, so this exercises the skip branch
+    by forcing the anchor to ``None`` -- the state a build without a
+    recorded anchor would be in.  Asserting on the live constant instead
+    would turn a legitimate anchor update into a test failure.
+    """
+    monkeypatch.setattr(mace_module, "MACE_MP0_MEDIUM_SHA256", None)
     payload = b"some-checkpoint-bytes"
     monkeypatch.setattr(mace_module, "urlopen", _fake_urlopen(payload))
 
@@ -58,6 +64,42 @@ def test_download_skips_verification_when_anchor_unset(fake_cache, monkeypatch):
 
     assert result == fake_cache
     assert result.read_bytes() == payload
+
+
+def test_shipped_anchor_is_a_full_lowercase_sha256():
+    """The committed anchor must be a usable 64-char hex digest."""
+    anchor = mace_module.MACE_MP0_MEDIUM_SHA256
+
+    assert anchor is not None, "the anchor must ship with a real value"
+    assert len(anchor) == 64
+    assert set(anchor) <= set("0123456789abcdef"), "expected lowercase hex"
+
+
+def test_download_rejects_bytes_that_do_not_match_the_shipped_anchor(fake_cache, monkeypatch):
+    """A payload that is not the real checkpoint is rejected by the real anchor."""
+    payload = b"definitely-not-the-real-mace-checkpoint"
+    monkeypatch.setattr(mace_module, "urlopen", _fake_urlopen(payload))
+
+    with pytest.raises(RuntimeError, match="SHA-256 integrity check"):
+        _download_default_weights()
+
+    assert not fake_cache.exists()
+
+
+def test_shipped_anchor_matches_the_local_checkpoint_when_available():
+    """End-to-end guard: hash the real cache file if this machine has one.
+
+    Skipped on clean CI hosts.  This is the only test that can catch an
+    anchor that is self-consistent inside the repository but wrong about
+    the actual upstream artifact.
+    """
+    from atominterface.backends.mace_ import mace_cache_path
+
+    cached = mace_cache_path()
+    if not cached.is_file():
+        pytest.skip(f"no cached MACE checkpoint at {cached}")
+
+    assert hash_bytes(cached.read_bytes()) == mace_module.MACE_MP0_MEDIUM_SHA256
 
 
 def test_cached_hit_bypasses_verification(fake_cache, monkeypatch):

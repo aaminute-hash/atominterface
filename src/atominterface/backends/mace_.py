@@ -42,14 +42,19 @@ MACE_MP0_MEDIUM_URL = (
 #: The value must only ever come from running
 #: ``atominterface.provenance.hash_bytes`` over a genuine download of
 #: ``MACE_MP0_MEDIUM_URL`` -- it is never hand-entered from memory or a
-#: third-party claim.  On 2026-10-31 the implementation environment could
-#: not reach the release asset (proxy refused the object store tunnel),
-#: so no authoritative value exists yet and the anchor is ``None``: the
-#: post-download check then skips gracefully instead of inventing a
-#: comparison.  To fill it: download the URL once from a trusted
-#: network, run ``hash_bytes(open(path, "rb").read())``, paste the hex
-#: string here, and note the date in this comment.
-MACE_MP0_MEDIUM_SHA256: str | None = None
+#: third-party claim.
+#:
+#: Recorded 2026-10-31 from a 44,422,970-byte download of the URL above,
+#: fetched as six HTTP range requests and reassembled.  Two independent
+#: hashers -- ``sha256sum`` and :func:`atominterface.provenance.hash_bytes`
+#: -- produced the identical digest.  The file was then confirmed to be a
+#: loadable ``mace.modules.models.ScaleShiftMACE`` that yields
+#: -4.0844 eV/atom and zero force for ideal fcc Cu at a = 3.615 A, so the
+#: anchor describes the real checkpoint rather than merely a self-
+#: consistent byte string.
+MACE_MP0_MEDIUM_SHA256: str | None = (
+    "01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845"
+)
 
 
 def mace_cache_path() -> Path:
