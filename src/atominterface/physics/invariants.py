@@ -90,7 +90,29 @@ def check_stress_symmetry(stress):
 
 
 def rotation_matrix(axis, angle):
-    """Return a 3x3 rotation matrix for rotation about axis by angle (degrees)."""
+    """Return a 3x3 rotation matrix for rotation about axis by angle (degrees).
+
+    The result is the standard right-handed (active, counter-clockwise looking
+    down the axis towards the origin) rotation, identical to what
+    ``ase.Atoms.rotate`` applies.  Concretely, ``rotation_matrix("z", 90)``
+    maps ``+x`` onto ``+y``.
+
+    The matrix acts on **column** vectors in the usual maths sense
+    (``R @ v``).  Because the rest of this module works in the row-vector
+    world, positions are rotated as ``positions @ R.T``, which is the same
+    transformation.  Use :func:`rotate_positions`, :func:`transform_forces`
+    and :func:`transform_stress_voigt` rather than multiplying by ``R``
+    directly, so forces and stress keep co-rotating with the coordinates.
+
+    .. versionchanged:: 0.5.2
+       The quaternion's vector part used to be negated, which silently
+       produced ``R(-angle)`` -- a matrix of the opposite handedness.  Nothing
+       inside the package consumed it, and ``rotate_positions`` used ``R.T``,
+       so the two sign flips cancelled and the geometry came out right.  The
+       danger was at the boundary: passing an ASE rotation (for example the
+       ZSL ``match.rotation``) into these helpers would have mirrored the
+       cell.  The matrix is now the same object ASE produces.
+    """
     # Handle string shortcuts
     if isinstance(axis, str):
         axis = axis.lower()
@@ -110,7 +132,7 @@ def rotation_matrix(axis, angle):
     theta = np.deg2rad(float(angle))
 
     a = np.cos(theta / 2.0)
-    b, c, d = -axis * np.sin(theta / 2.0)
+    b, c, d = axis * np.sin(theta / 2.0)
     aa, bb, cc, dd = a * a, b * b, c * c, d * d
     bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
     return np.array(

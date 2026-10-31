@@ -102,11 +102,37 @@ def test_forces_transform_as_vectors():
     F = np.array([[1.0, 0.0, 0.0]])
     R = rotation_matrix("z", 90.0)
     Fp = transform_forces(F, R)
-    # Revised in 0.5.1: the old expectation [[0, 1, 0]] pinned the wrong
-    # contract.  Forces are polar vectors, so with rotate_positions using
-    # positions @ R.T the force must be forces @ R.T too -- an +x force
-    # rotates onto -y, exactly the way the +x coordinate does.
-    assert np.allclose(Fp, [[0.0, -1.0, 0.0]], atol=1e-12)
+    # Revised in 0.5.2.  Two earlier expectations were both wrong, for
+    # opposite reasons: the original [[0, 1, 0]] came from `forces @ R`, and
+    # the 0.5.1 replacement [[0, -1, 0]] came from `forces @ R.T` applied to a
+    # matrix that was itself R(-theta).  Two sign flips cancelled, so the
+    # number looked stable while the convention underneath was inverted.
+    # With rotation_matrix now returning the standard right-handed matrix,
+    # +90 degrees about z maps +x onto +y -- the same thing
+    # `ase.Atoms.rotate(90, "z")` does, which the test below asserts directly.
+    assert np.allclose(Fp, [[0.0, 1.0, 0.0]], atol=1e-12)
+
+
+def test_rotation_matrix_matches_ase_handedness():
+    """rotation_matrix must agree with ASE, element for element.
+
+    This is the boundary the 0.5.2 fix was about: once the matrix is the same
+    object ASE produces, an ASE rotation (for example the ZSL
+    ``match.rotation``) can be handed to rotate_positions/transform_forces
+    without mirroring the cell.
+    """
+    from ase import Atoms
+
+    for axis in ("x", "y", "z"):
+        R = rotation_matrix(axis, 37.0)
+
+        probe = Atoms("H", positions=[[1.0, 2.0, 3.0]])
+        probe.rotate(37.0, axis, center=(0.0, 0.0, 0.0))
+        # ASE rotates a column vector, R_ase @ p.  If our matrix is the same
+        # object, then R @ p must land on precisely the position ASE reports.
+        assert np.allclose(R @ np.array([1.0, 2.0, 3.0]), probe.positions[0], atol=1e-14)
+        # det(R) == +1 rules out the mirror image that R(-theta) amounts to.
+        assert abs(np.linalg.det(R) - 1.0) < 1e-12
 
 
 def test_rotate_positions_rigid_body_invariants():
