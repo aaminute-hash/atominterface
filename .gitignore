@@ -81,6 +81,9 @@ relax_audit.md
 candidates.csv
 *.log
 
+# Local tooling -- contains a live API key, never commit
+claude-local.sh
+
 # OS
 .DS_Store
 Thumbs.db
