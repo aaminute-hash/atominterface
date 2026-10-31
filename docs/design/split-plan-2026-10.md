@@ -13,7 +13,12 @@
 2. 换行纪律：改任何文本用 `open(..., newline="")` 读写。本仓库 `.md` 文档已全部为 LF
    （实测 `docs/design/registry_field.md`、`docs/roadmap.md` 等 CRLF=0），新建 `.md` 保持 LF；
    归档 CSV 仍是 UTF-8 无 BOM + CRLF，拆分不得触碰。
-3. 每步单独提交（Conventional Commits），先确认分支，不在 `feat/v0.5.1-increment` 上直接改。
+   〔补充核实 2026-10-31（按 git blob 二进制统计，非 `grep`——本机 `grep -c $'\r'` 会匹配空模式
+   给出全命中假象）：22 个 `.md` 中 19 个纯 LF、3 个归档验证目录 README 纯 CRLF；连同
+   `.py`/`.toml`/`.yml`/`.sh`/`.csv` 共 87 个文本文件，71 个纯 LF、16 个纯 CRLF 且 16 个全部是
+   归档 CSV，**无一混合换行**。即 `.py`/`.md`/`.toml` 一律 LF，只有归档 CSV 是 CRLF。〕
+3. 每步单独提交（Conventional Commits），先确认分支。`feat/v0.5.1-increment` 已于 2026-10-31
+   作为 v0.5.1 合并进 `main`（v0.5.2 随后发布），落地时从当前 `main` 开 `refactor/split-*` 分支。
 
 ---
 
@@ -187,14 +192,14 @@ src/atominterface/
 ```
 _coherent/_constants.py            （零内部依赖）
 _coherent/_util.py                 （仅标准库/ase/pymatgen）
-_coherent/cells.py                 → _constants、strain.py、pymatgen
-_coherent/match.py                 → cells、strain、_constants、pymatgen
+_coherent/cells.py                 → _constants、pymatgen
+_coherent/match.py                 → cells、_constants、pymatgen
 _coherent/gates.py                 → cells、_util、_constants、relax.proximity
 _coherent/placement.py             → cells、_util、_constants、relax.proximity
 _coherent/config.py                → charge facade、placement、_constants、base
 _coherent/assembly.py              → config、match、cells、gates、placement、charge facade
 _coherent/builder.py               → config、match、cells、assembly、placement、charge facade、candidates
-_coherent/coherent.py (facade)     → 上述全部 + charge facade + registry
+builders/coherent.py (facade)      → 上述全部 + charge facade + registry
 ```
 
 charge 侧同理：
@@ -305,8 +310,10 @@ coherent），所以 charge 必须先拆、coherent 后拆，顺序不能反。
 ## 7. 风险与注意事项
 
 1. **回环是头号风险**。`CoherentInterfaceConfig` 同时被 `assembly`/`builder`/facade/测试引用，
-   `_MatchInfo` 被 `match`/`cells`/`assembly`/`builder`/测试引用——它们必须落在叶子层
-   （`config.py`、`match.py`），不能让 `builder` 反向 import `coherent` facade 拿 config。
+   `_MatchInfo` 被 `match`/`assembly`/`builder`/测试引用（细胞的账本函数不引用它，已逐行核对）
+   ——两者必须落在叶子层（`config.py`、`match.py`），不能让 `builder` 反向 import `coherent`
+   facade 拿 config。注意 `match.py` 单向依赖 `cells.py`，所以 `_MatchInfo` 只能放 `match.py`
+   或更靠下的叶子，放进 `cells.py` 会立即成环。
    落地时用 `python -c "import atominterface.builders.coherent"` 冷启动冒烟即可发现环。
 2. **`_orient_slab` 的调用点解析**（§4.3）是唯一会"看似绿实则 patch 失效"的点，拆分评审必须
    单独盯。
@@ -315,9 +322,14 @@ coherent），所以 charge 必须先拆、coherent 后拆，顺序不能反。
    facade 若把注册逻辑搬进子模块，reload 语义会变。
 4. **`_to_ase`/`_reduced_formula`/`_pair_label` 是共享工具**，单独放 `_util.py`，避免三个子模块
    各自复制一份（复制会制造"同一逻辑两处"的漂移，正是本项目铁律要防的）。
-5. 换行纪律：`.md` 保持 LF，`.py` 用 `open(..., newline="")` 改；CSV 不碰。
-6. 本仓库有 `.egg-info/SOURCES.txt` 里列出旧文件路径，纯搬移（文件数变化）后需确认打包清单
-   （`pip install -e .`）仍含新子包——属落地时第 0 步检查项，不是本预研范围。
+5. 换行纪律：`.md`/`.py` 保持 LF（`Path.write_text()` 在 Windows 会把 LF 翻成 CRLF，
+   所以只能用 `open(..., newline="")`）；归档 CSV 保 CRLF，不碰。
+6. 打包不构成风险，但结论要写对：`src/atominterface.egg-info/` 是本地构建产物，`.gitignore:23`
+   已忽略、未跟踪，不参与版本库；`pyproject.toml` 用
+   `[tool.setuptools.packages.find] include = ["atominterface*"]` 自动发现子包，所以新私有子包
+   **只需带 `__init__.py`** 就会被打包。落地第 0 步用 `pip install -e .` 后
+   `python -c "import atominterface._coherent, atominterface._charge, atominterface._cli_build"`
+   各验一次即可。
 
 ---
 
@@ -329,8 +341,12 @@ coherent），所以 charge 必须先拆、coherent 后拆，顺序不能反。
    `placement.py`（为 R11 `registry="scan"` 铺路）。
 2. **`_orient_slab` patch 目标**：改测试目标为 `charge._orient_slab`（推荐），还是在 facade 造
    `_orient_slab` 的运行时间接层。
-3. **`ZSLGenerator`（`create=True`）无效 patch**（§4.3）：顺带修为 `monkeypatch.setattr(ZSLGenerator, "__call__", ...)`，
-   还是保留现状、只 re-export `ZSLGenerator` 做兼容。
+3. **`ZSLGenerator`（`create=True`）无效 patch**（§4.3）：建议顺带修测试为
+   `monkeypatch.setattr(ZSLGenerator, "__call__", _boom)`（`test_coherent_builder.py:1130` 已是这么写的）。
+   **不要选「只 re-export `ZSLGenerator` 做兼容」**——那是假修复：`_match_lattices` 在函数体内
+   `from pymatgen...zsl import ZSLGenerator` 本地导入，永远读 pymatgen 的类，facade 上 re-export
+   只会让 patch 不再报错、行为依旧不受影响，把「删了会红」变成「留着也没用」的静默无效。
+   `__call__` 那条路确实咬得住：`coherent.py:878` 是 `generator(film_vecs, sub_vecs)` 实例调用。
 4. 私有子包是否加 `__init__.py` 的 `__all__`（建议：`_coherent/__init__.py` 留空，只作命名空间，
    避免再引入一层 import 顺序敏感）。
 
@@ -342,5 +358,6 @@ coherent），所以 charge 必须先拆、coherent 后拆，顺序不能反。
 - 与 `roadmap.md` "Monolith split candidates" 一节互补：roadmap 给了粗切线，本文给行号级
   边界、模块间接口、迁移顺序和 monkeypatch 面。落地时以本文为准，roadmap 那节回写为
   "已立项/已拆分"状态。
-- 落地前需先核实 `.egg-info/SOURCES.txt` 与打包路径（§7.6），并确认 `CLAUDE.md` 的
-  "MACE 权重 SHA-256 锚点待填" 与 `__version__` bump 已处理，避免与本拆分交叠提交。
+- 初稿要求落地前确认的两项**已于 2026-10-31 完成**，不再是前置条件：MACE-MP-0 medium 权重
+  SHA-256 锚点已填入 `mace_.py`（`01bfe221…5845`，四路互证），版本号已 bump 至 0.5.2 并发布
+  （v0.5.1 → PR #37、v0.5.2 → PR #38）。拆分应从 `main`（`80eac59` 起）开分支，不存在交叠提交。
