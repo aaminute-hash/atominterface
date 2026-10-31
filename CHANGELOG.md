@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.2] - 2026-10-31
+
+### Fixed
+
+- **`rotation_matrix(axis, angle)` returned a matrix of the wrong handedness.**
+  The quaternion's vector part was negated, producing `R(-theta)` -- the
+  mirror-transpose of what ASE builds. `ase.Atoms.rotate(90, "z")` maps `+x`
+  onto `+y`; `rotation_matrix("z", 90)` mapped `+x` onto `-y`.
+
+  This never produced a wrong number inside the package, because
+  `rotate_positions` consumes the matrix as `positions @ R.T` and the two sign
+  flips cancelled. The defect lived entirely at the boundary: passing an ASE
+  rotation (for example the ZSL `match.rotation`) into `rotate_positions`,
+  `transform_forces` or `transform_stress_voigt` would have mirrored the cell
+  silently.
+
+  Migration: if you used the returned matrix as a column-vector operator
+  (`R @ v`), it now means what a textbook rotation means. If you compensated
+  for the old behaviour by transposing it yourself, drop that compensation.
+  `rotate_positions(p, R)` yields the same coordinates as before for the same
+  `R`, so code that only used the helpers is unaffected.
+
+  `test_rotation_matrix_matches_ase_handedness` now pins agreement with
+  `ase.Atoms.rotate` on all three axes, plus `det(R) = +1`.
+
 ## [0.5.1] - 2026-10-31
 
 ### Breaking
