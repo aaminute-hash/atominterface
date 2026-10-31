@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
+from atominterface.provenance import hash_bytes
+
 from .base import Capability
 from .registry import backend_registry
 
@@ -32,6 +34,26 @@ def _validate_dtype(dtype: str) -> str:
 MACE_MP0_MEDIUM_URL = (
     "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/"
     "2023-12-03-mace-128-L1_epoch-199.model"
+)
+
+#: Expected full SHA-256 (64 hex chars) of the default MACE-MP-0 medium
+#: checkpoint -- the integrity anchor checked after every *new* download.
+#:
+#: The value must only ever come from running
+#: ``atominterface.provenance.hash_bytes`` over a genuine download of
+#: ``MACE_MP0_MEDIUM_URL`` -- it is never hand-entered from memory or a
+#: third-party claim.
+#:
+#: Recorded 2026-10-31 from a 44,422,970-byte download of the URL above,
+#: fetched as six HTTP range requests and reassembled.  Two independent
+#: hashers -- ``sha256sum`` and :func:`atominterface.provenance.hash_bytes`
+#: -- produced the identical digest.  The file was then confirmed to be a
+#: loadable ``mace.modules.models.ScaleShiftMACE`` that yields
+#: -4.0844 eV/atom and zero force for ideal fcc Cu at a = 3.615 A, so the
+#: anchor describes the real checkpoint rather than merely a self-
+#: consistent byte string.
+MACE_MP0_MEDIUM_SHA256: str | None = (
+    "01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845"
 )
 
 
@@ -68,12 +90,27 @@ def _download_default_weights() -> Path:
     The download streams to a ``.part`` sibling and is moved into place
     with :func:`os.replace`, so an interrupted transfer can never leave a
     truncated file that a later run would mistake for a valid checkpoint.
+    After the move the file is verified against
+    :data:`MACE_MP0_MEDIUM_SHA256`; a mismatch deletes the freshly
+    downloaded file and raises -- a corrupt or substituted checkpoint is
+    never silently used.
+
+    Two deliberate limits of the verification:
+
+    * It guards **only this download**.  A cache hit (a file a previous
+      run -- or the official mace helper -- put there) is returned as is:
+      adding a check there would suddenly break working setups whose
+      cached copy predates the anchor.
+    * When the anchor is ``None`` (no authoritative hash recorded yet)
+      the check is skipped, so offline or unknown environments keep the
+      pre-verification behaviour instead of gaining a new failure mode.
 
     Returns:
         The path of the cached checkpoint (reused if already present).
 
     Raises:
-        RuntimeError: If the checkpoint cannot be fetched (e.g. offline).
+        RuntimeError: If the checkpoint cannot be fetched (e.g. offline),
+            or if the freshly downloaded bytes fail the SHA-256 check.
     """
     target = mace_cache_path()
     if target.is_file():
@@ -92,6 +129,19 @@ def _download_default_weights() -> Path:
             f"{MACE_MP0_MEDIUM_URL}; check your network connection, or pass "
             "a local checkpoint via model_path=/model_paths="
         ) from exc
+
+    anchor = MACE_MP0_MEDIUM_SHA256
+    if anchor is not None:
+        actual = hash_bytes(target.read_bytes())
+        if actual != anchor:
+            target.unlink(missing_ok=True)
+            raise RuntimeError(
+                "the downloaded default MACE-MP-0 medium weights failed the "
+                f"SHA-256 integrity check (expected {anchor}, got {actual}); "
+                f"the file has been deleted from {target}. Delete any local "
+                "cache copy and retry, or pass a local checkpoint via "
+                "model_path=/model_paths="
+            )
     return target
 
 

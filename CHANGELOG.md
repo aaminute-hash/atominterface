@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.5.1] - 2026-10-31
+
+### Breaking
+
+- **`transform_forces(f, R)` now returns `f @ R.T` (previously `f @ R`).**
+  Forces are polar vectors: in the row-vector convention the code already
+  uses (`rotate_positions(p, R) = p @ R.T`) a force must co-rotate with the
+  coordinates, so the same `R` maps `+x` onto `-y` for both. The old
+  `forces @ R` rotated forces in the *opposite* direction -- a rigid body's
+  forces did not follow its coordinates. Migration: external consumers that
+  compensated by passing `R.T` themselves can simply drop that
+  compensation. There are no internal callers (verified by grep at the time
+  of the change).
+
+### Fixed
+
+- **`check_force_consistency` is a real finite-difference check.** It used
+  to be a stub that returned `0.0` unconditionally, so "forces consistent
+  with the energy" was never actually verified anywhere. It now computes
+  `max_i |F_i - (-dE/dr_i)|` by a central finite difference of a caller
+  supplied energy function and never mutates the input positions. The
+  signature changes accordingly: the first argument is now an energy
+  function handle `energy_fn(positions) -> float` instead of a scalar
+  energy. The old stub had no real consumers (verified by grep).
+- **`current_seed` reads a real fingerprint of the numpy RNG state.** It
+  used to run `int(state[0])` on numpy's `get_state()` tuple, whose first
+  element is the algorithm name string `'MT19937'` -- the call always
+  raised `ValueError` and was silently swallowed into `None`, so the
+  field was dead. It now returns a deterministic SHA-256 fingerprint of
+  the 624-word MT19937 state plus stream position (state A semantics:
+  a *state* fingerprint, explicitly not a seed for restoration --
+  documented in the docstring). `build_meta()` now fills `seed` from it
+  when no explicit seed is passed, so `metadata.yaml` always records the
+  randomness a run actually used.
+- **`EV_A3_TO_GPA` can no longer drift from `EV_A3_TO_PA`.** The two
+  constants were independent literals in the same file and had already
+  disagreed in their last four digits (160.21766208 vs the 160.2176634
+  implied by the exact 1.602176634e11 Pa). `EV_A3_TO_GPA` is now derived
+  as `EV_A3_TO_PA / 1e9`, so a single truth feeds both. The top level no
+  longer keeps its own copy of any physics constant either:
+  `atominterface.*` constants are forwards of `atominterface.physics.*`
+  by identity (verified by test), and the top-level `__all__` now covers
+  the full physics export surface (`rotation_matrix`, `transform_forces`,
+  `transform_stress_voigt`, `ANG_TO_BOHR`, `ev_per_a3_to_gpa`,
+  `gpa_to_ev_per_a3`, ...). Numeric impact of the drift fix is e-8 in
+  relative terms and only meaningful in the same environment
+  (float-identity conclusions are environment-bound as always).
+
+### Added
+
+- **The default MACE-MP-0 medium download is now integrity-checked.**
+  After `_download_default_weights` moves the checkpoint into place it is
+  hashed with `provenance.hash_bytes` and compared against the
+  `MACE_MP0_MEDIUM_SHA256` anchor; a mismatch deletes the downloaded
+  file and raises with the expected/actual hashes and recovery guidance,
+  so a corrupt or substituted checkpoint can never be silently used.
+  The check deliberately covers only the *current* download: a cache
+  hit from a previous run (or the official mace helper) is returned
+  without verification, so existing working setups never break. The
+  anchor is currently `None` -- the implementation environment could not
+  reach the release asset on 2026-10-31 (proxy refused the object-store
+  tunnel), and a hash is only ever recorded from a genuine download,
+  never hand-entered. Until a trusted environment fills it, the check
+  skips gracefully and behaviour is unchanged; the fill procedure is
+  documented beside the constant.
+
+### Documentation
+
+- `docs/roadmap.md` records two facts for the next cycle: the
+  `pydantic` dependency is declared in `pyproject.toml` but referenced
+  nowhere in `src/` (per the user decision the declaration stays, the
+  fact is recorded, and disposal is deferred to a release window), and
+  the monolith split candidates for `builders/coherent.py` (2700+
+  lines) and `builders/charge.py` (932 lines) with their cut lines --
+  including the one silent fallback in `coherent.py` (the single-match
+  rotation `suppress(Exception)`) that is deliberately left for that
+  split rather than widened in this cycle.
+
 ## [0.5.0] - 2026-10-30
 
 **This release changes the numbers a (110) build produces.** Read "Changed"

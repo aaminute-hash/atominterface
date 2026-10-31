@@ -137,3 +137,42 @@ Deliverables:
 - Publish a software paper (JOSS or CPC)
 - Submit PRs / start Discussions in ase, pymatgen, matgl, torch-sim
 - Establish a citation format and a "paper using AtomInterface" list
+
+## Dependency facts (recorded 2026-10-31)
+
+**`pydantic` is declared but unreferenced.** `pyproject.toml` lists
+`pydantic>=1.10,<3` in `dependencies`, and a full grep of `src/` at this
+date finds zero imports of it anywhere in the package (tests neither).
+Per the user decision of this cycle (Q1) the declaration **stays** and
+this note is the record: it is a known fact, not an approved dependency.
+Disposal is deferred to the next version window's release-process
+cleanup -- and must be re-verified there (grep `src/` for `pydantic`
+again, in case new code has started using it in the meantime). The
+dependency range in `pyproject.toml` is frozen for this cycle and was
+not touched.
+
+## Monolith split candidates (recorded 2026-10-31, next-cycle P1 candidates)
+
+Two modules have grown past the size where a single review can hold them,
+and both now have clear cut lines.  Recorded here so the boundary work has
+a spec to start from; neither is scheduled for this cycle.
+
+- `src/atominterface/builders/coherent.py` (2700+ lines).  Candidate
+  cuts, in dependency order: the `_match_lattices` family (ZSL wrapping,
+  area/strain filtering, `_area_ratio_ok`, `_strain_of`), the
+  `_fallback_matches` brute-force search, the `CoherentInterfaceBuilder`
+  class itself, and the remaining misc helpers (`_reduced_formula`,
+  `_format_matrix`, ...).  The module-level pymatgen bindings
+  (`_PYMTG_COHERENT_BUILDER` etc.) must move with whatever imports them,
+  and tests patch `atominterface.builders.coherent.ZSLGenerator`-style
+  names, so a split needs to keep those patch points importable from a
+  stable location.
+- `src/atominterface/builders/charge.py` (932 lines).  Candidate cut:
+  termination sampling vs. the builder/polarity analysis.
+
+One small silent-fallback in `coherent.py` is deliberately *not* touched
+this cycle and belongs to the split instead: the
+`with suppress(Exception): rotation = ...` around a single match's
+rotation parsing (~line 887).  It only degrades one match's local
+attribute, not the enumeration path, so widening it now would grow the
+regression surface of this cycle for little gain.

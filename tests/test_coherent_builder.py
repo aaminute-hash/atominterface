@@ -1113,3 +1113,55 @@ def test_interface_ids_are_unique_across_candidates():
     candidates = builder.build()
     assert len(candidates) > 1
     assert len({candidate.interface_id for candidate in candidates}) == len(candidates)
+
+
+# ------------------------------------------------------------------
+# ZSL fallback visibility (0.5.1)
+#
+# ZSL failure used to be swallowed by an ``except Exception: pass`` and
+# the brute-force fallback ran silently.  The fallback is a different
+# enumeration whose matches and strains can differ as a whole, so the
+# switch must at least warn.
+# ------------------------------------------------------------------
+_ZSL_CONFIG = CoherentInterfaceConfig(
+    max_strain=0.30,
+    max_area=100.0,
+    zsl_max_area_ratio=4.0,
+    zsl_max_angle=2.0,
+)
+
+
+def test_zsl_failure_warns_and_still_falls_back(fcc_structure, monkeypatch):
+    """A ZSL crash warns (with the pair label) but still yields candidates."""
+    from pymatgen.analysis.interfaces.zsl import ZSLGenerator  # noqa: WPS433
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("zsl exploded")
+
+    monkeypatch.setattr(ZSLGenerator, "__call__", _boom)
+
+    with pytest.warns(UserWarning, match="ZSL lattice matching failed.*substrate"):
+        matches = _match_lattices(
+            fcc_structure.lattice.matrix,
+            fcc_structure.lattice.matrix,
+            _ZSL_CONFIG,
+            label="substrate (1, 0, 0) / film (1, 0, 0)",
+        )
+
+    assert len(matches) >= 1
+    assert all(m.match_area <= _ZSL_CONFIG.max_area for m in matches)
+
+
+def test_zsl_normal_path_no_new_warning(fcc_structure):
+    """The healthy ZSL path must not emit the new fallback warning."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        matches = _match_lattices(
+            fcc_structure.lattice.matrix,
+            fcc_structure.lattice.matrix,
+            _ZSL_CONFIG,
+        )
+
+    assert matches
+    fallback_warnings = [w for w in caught if "ZSL lattice matching failed" in str(w.message)]
+    assert fallback_warnings == []
