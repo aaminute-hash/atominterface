@@ -21,9 +21,7 @@ def test_check_force_consistency_harmonic_oscillator_exact():
     rng = np.random.default_rng(5)
     positions = rng.normal(0.0, 0.5, (3, 3))
     exact_forces = -k * positions
-    residual = check_force_consistency(
-        _harmonic_energy(k), exact_forces, positions, delta=1e-4
-    )
+    residual = check_force_consistency(_harmonic_energy(k), exact_forces, positions, delta=1e-4)
     assert 0.0 <= residual < 1e-6
 
 
@@ -32,9 +30,7 @@ def test_check_force_consistency_reports_wrong_force_nonzero():
     k = 1.0
     positions = np.array([[0.1, -0.2, 0.3]])
     wrong_forces = -1.5 * k * positions  # 1.5x too steep
-    residual = check_force_consistency(
-        _harmonic_energy(k), wrong_forces, positions, delta=1e-4
-    )
+    residual = check_force_consistency(_harmonic_energy(k), wrong_forces, positions, delta=1e-4)
     assert residual > 0.0
     # The planted force error is 0.5*k*|r| per component; the finite
     # difference itself contributes only ~delta^2 of noise.
