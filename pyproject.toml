@@ -1,6 +1,6 @@
 [project]
 name = "atominterface"
-version = "0.5.0"
+version = "0.5.1"
 description = "Reliable interface modeling for AI4S: coherent interface builder + uMLIP guard layer + thermodynamic profiler."
 readme = "README.md"
 requires-python = ">=3.12"
