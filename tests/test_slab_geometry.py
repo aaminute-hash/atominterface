@@ -795,7 +795,7 @@ def test_gate_is_not_swallowed_when_orientation_is_short_circuited():
         substrate=_fcc("Cu", 3.615), film=_fcc("Ni", 3.524), config=config
     )
     with (
-        patch("atominterface.builders.coherent._orient_slab", side_effect=lambda slab: slab),
+        patch("atominterface._coherent.assembly._orient_slab", side_effect=lambda slab: slab),
         pytest.raises(GeometryGateError, match="criterion B"),
     ):
         builder.build_all()
