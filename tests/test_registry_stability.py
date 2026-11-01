@@ -168,12 +168,12 @@ def test_shift_is_a_no_op_except_on_the_on_top_family(monkeypatch):
     path is a no-op for these boards, and a tolerance would turn "we
     moved (001)" into a passing test as long as the move was small.
     """
-    from atominterface.builders import coherent
+    from atominterface._coherent import placement
 
     def _pair(miller, min_thickness):
         """(as shipped, shift suppressed) for one configuration."""
         normal = _build(miller, min_thickness)
-        monkeypatch.setattr(coherent, "_off_on_top_shift", lambda *a, **k: np.zeros(2))
+        monkeypatch.setattr(placement, "_off_on_top_shift", lambda *a, **k: np.zeros(2))
         suppressed = _build(miller, min_thickness)
         monkeypatch.undo()
         return normal, suppressed
