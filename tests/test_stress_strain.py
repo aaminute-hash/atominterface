@@ -8,6 +8,8 @@ future sign/order regression fails loudly.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -17,6 +19,7 @@ from ase.io import write as ase_write
 from atominterface.physics import (
     EV_A3_TO_GPA,
     cauchy_to_voigt,
+    export_constitutive_table,
     extract,
     green_lagrange_strain,
     rotate_stress,
@@ -236,3 +239,56 @@ def test_extract_from_file_path(tmp_path) -> None:
     np.testing.assert_allclose(table.strain_voigt[0], np.zeros(6), atol=1e-8)
     assert table.strain_voigt[1, 0] == pytest.approx(0.105, abs=1e-8)
     assert table.strain_voigt[2, 0] == pytest.approx(0.22, abs=1e-8)
+
+
+# ── export_constitutive_table() round-trip ─────────────────────
+
+
+def test_export_constitutive_table_roundtrip(tmp_path) -> None:
+    frames = [
+        _make_frame([3.6, 3.6, 3.6]),
+        _make_frame([3.96, 3.6, 3.6], velocities=VELS, stress=SIGMA),
+        _make_frame([4.32, 3.6, 3.6], velocities=VELS, stress=SIGMA),
+    ]
+    table = extract(frames)
+    path = export_constitutive_table(table, tmp_path / "table")
+    assert path == tmp_path / "table.npz"
+    assert path.exists()
+
+    data = np.load(path)
+    assert set(data.files) == {
+        "strain_voigt",
+        "cauchy_stress_voigt",
+        "cauchy_stress_voigt_gpa",
+        "temperature",
+        "cells",
+        "volumes",
+        "reference_cell",
+        "has_stress",
+        "units",
+    }
+
+    np.testing.assert_allclose(data["strain_voigt"], table.strain_voigt, atol=1e-12)
+    np.testing.assert_allclose(data["cauchy_stress_voigt"], table.cauchy_stress_voigt, atol=1e-12)
+    np.testing.assert_allclose(
+        data["cauchy_stress_voigt_gpa"], table.cauchy_stress_voigt_gpa, atol=1e-12
+    )
+    np.testing.assert_allclose(data["temperature"], table.temperature, atol=1e-12)
+    np.testing.assert_allclose(data["cells"], table.cells, atol=1e-12)
+    np.testing.assert_allclose(data["volumes"], table.volumes, atol=1e-12)
+    np.testing.assert_allclose(data["reference_cell"], table.reference_cell, atol=1e-12)
+    np.testing.assert_array_equal(data["has_stress"], table.has_stress)
+    assert table.n_frames == 3
+
+    assert json.loads(str(data["units"])) == table.units
+    assert json.loads(str(data["units"]))["cauchy_stress_voigt"] == "eV/A^3"
+    assert json.loads(str(data["units"]))["cauchy_stress_voigt_gpa"] == "GPa"
+
+
+def test_export_constitutive_table_omits_absent_channels(tmp_path) -> None:
+    table = extract([_make_frame([3.6, 3.6, 3.6])])
+    path = export_constitutive_table(table, tmp_path / "table.npz")
+    data = np.load(path)
+    assert "cauchy_stress_voigt" not in data.files
+    assert "cauchy_stress_voigt_gpa" not in data.files
+    assert "temperature" not in data.files

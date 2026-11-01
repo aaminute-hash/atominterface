@@ -39,6 +39,7 @@ from atominterface.physics.invariants import (
 from atominterface.physics.stress_strain import (
     StressStrainTable,
     cauchy_to_voigt,
+    export_constitutive_table,
     extract,
     green_lagrange_strain,
     strain_to_voigt,
@@ -66,6 +67,7 @@ __all__ = [
     "strain_to_voigt",
     "virial_to_cauchy",
     "cauchy_to_voigt",
+    "export_constitutive_table",
     "extract",
     "StressStrainTable",
 ]

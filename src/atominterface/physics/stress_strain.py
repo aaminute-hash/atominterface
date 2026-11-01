@@ -25,6 +25,7 @@ Conventions (fixed, do not change without updating ``transform_stress_voigt``):
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -316,9 +317,56 @@ def extract(trajectory, *, reference_cell=None) -> StressStrainTable:
     )
 
 
+def export_constitutive_table(table: StressStrainTable, path: str | Path) -> Path:
+    """Write a :class:`StressStrainTable` to a NumPy ``.npz`` constitutive table.
+
+    The ``.npz`` stores one array per channel, keyed exactly as in the dataclass
+    (``strain_voigt``, ``cauchy_stress_voigt``, ``cauchy_stress_voigt_gpa``,
+    ``temperature``, ``cells``, ``volumes``, ``reference_cell``, ``has_stress``),
+    plus a JSON string key ``units`` for the unit labels.
+
+    Channels that are ``None`` (absent on all frames) are omitted so ``np.load``
+    consumers can branch on key presence with ``if key in data``.
+
+    Args:
+        table: The extracted table to serialise.
+        path: Output ``.npz`` path (``str`` or ``Path``; a ``.npz`` suffix is
+            appended if missing).
+
+    Returns:
+        The resolved ``Path`` the table was written to.
+    """
+    path = Path(path)
+    if path.suffix != ".npz":
+        path = path.with_suffix(path.suffix + ".npz")
+
+    data: dict[str, np.ndarray] = {
+        "strain_voigt": table.strain_voigt,
+        "cells": table.cells,
+        "volumes": table.volumes,
+        "has_stress": table.has_stress,
+        "reference_cell": table.reference_cell,
+    }
+    for key in (
+        "cauchy_stress_voigt",
+        "cauchy_stress_voigt_gpa",
+        "temperature",
+    ):
+        value = getattr(table, key)
+        if value is not None:
+            data[key] = value
+    data["units"] = np.asarray(json.dumps(table.units))
+
+    # ``allow_pickle=False`` is explicit so mypy does not try to match the
+    # ``**data`` keys against numpy's ``allow_pickle`` keyword argument.
+    np.savez(path, allow_pickle=False, **data)
+    return path
+
+
 __all__ = [
     "StressStrainTable",
     "cauchy_to_voigt",
+    "export_constitutive_table",
     "extract",
     "green_lagrange_strain",
     "strain_to_voigt",
