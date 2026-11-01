@@ -29,6 +29,17 @@
 - `examples/02_md_stress_strain.py` — the Phase 0.4 pipeline demo: a
   synthetic stretched Cu supercell becomes an extracted table and a `.npz`
   constitutive table, pure ase/numpy (no network, no MACE).
+- **`physics/md_sources.py` — real-MD bridges.** `read_lammps_md(dump, log)`
+  and `read_cp2k_md(stress, pos, cell, ener=...)` turn a LAMMPS classical run
+  and a CP2K AIMD run into `list[ase.Atoms]` frames carrying the full Cauchy
+  stress (tension positive, eV/A³) as a `SinglePointCalculator`. The three
+  source conventions are pinned and unit-tested: pressure is negated to
+  stress (`sigma = -P`), `bar -> eV/A^3` via `1e-4 / EV_A3_TO_GPA`, and the
+  kinetic term is kept by reading the software's *full* pressure (LAMMPS
+  `pxx..pyz`, CP2K `.stress`) rather than rebuilding a virial from
+  coordinates. LAMMPS velocities are converted A/ps -> ASE via
+  `sqrt(mvv2e)`. See `docs/validation_md_virial_cauchy.md` for the
+  frame-by-frame real-data cross-check.
 
 ## [0.5.2] - 2026-10-31
 
