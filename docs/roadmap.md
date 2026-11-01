@@ -134,6 +134,22 @@ Deliverables:
 - CZM codegen (UMAT / VUMAT / MOOSE) comes **after** the data pipeline
   is trusted
 
+**Status (step one, landed).** `physics/stress_strain.py` now delivers
+`extract` (per-frame Green-Lagrange strain + Cauchy stress + temperature
+from any ASE trajectory-like input), the frame-level helpers
+(`green_lagrange_strain`, `strain_to_voigt`, `virial_to_cauchy`,
+`cauchy_to_voigt`), and `export_constitutive_table` (a NumPy `.npz`
+constitutive table). The invariance half of the second bullet is covered in
+`tests/test_stress_strain.py` — rigid-rotation stress invariance, Voigt
+round-trips, and hand-computed uniaxial / shear strain.
+
+The "Pint unit enforcement" in the first bullet was **deliberately not
+introduced**: Cauchy stress is returned in eV/Å³ with a GPa copy, and the
+`StressStrainTable.units` dict records the labels explicitly, so no new
+runtime dependency was needed (the dependency range is frozen). CZM
+UMAT/VUMAT remains deferred, and the FEniCSx unit-cell example is still
+pending until the data pipeline is trusted.
+
 ## Phase 0.5 — Community
 
 - Publish a software paper (JOSS or CPC)

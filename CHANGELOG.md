@@ -11,6 +11,24 @@
   all); it is the CLI spelling of `CoherentInterfaceConfig.max_registry_sites`.
 - `enumerate_registry_sites(sub_coords, sub_2d)` enumerates the
   distinguishable in-plane sites of a surface in deterministic order.
+- **`physics/stress_strain.py` — the Phase 0.4 (AutoConstitutive) data
+  pipeline.** `extract(trajectory, *, reference_cell=None)` turns any ASE
+  trajectory-like input (a file path, an `ase.io.Trajectory`, or a sequence
+  of `Atoms`) into a `StressStrainTable` of per-frame Green-Lagrange strain,
+  Cauchy stress (eV/Å³, plus a GPa copy) and temperature. It is a pure,
+  side-effect-free pipeline that never imports or touches
+  `atominterface.relax`.
+- `green_lagrange_strain`, `strain_to_voigt`, `virial_to_cauchy` and
+  `cauchy_to_voigt` — the frame-level physics helpers behind `extract`, in
+  the Voigt order `[xx, yy, zz, yz, xz, xy]` with **tensor** shear
+  components (no 2× engineering factor), matching `transform_stress_voigt`
+  and ASE's `get_stress(voigt=True)`.
+- `export_constitutive_table(table, path)` writes a `StressStrainTable` to a
+  NumPy `.npz` constitutive table — one array per channel plus a `units`
+  JSON string key — for downstream fitting.
+- `examples/02_md_stress_strain.py` — the Phase 0.4 pipeline demo: a
+  synthetic stretched Cu supercell becomes an extracted table and a `.npz`
+  constitutive table, pure ase/numpy (no network, no MACE).
 
 ## [0.5.2] - 2026-10-31
 
