@@ -36,6 +36,14 @@ from atominterface.physics.invariants import (
     transform_forces,
     transform_stress_voigt,
 )
+from atominterface.physics.stress_strain import (
+    StressStrainTable,
+    cauchy_to_voigt,
+    extract,
+    green_lagrange_strain,
+    strain_to_voigt,
+    virial_to_cauchy,
+)
 
 __all__ = [
     "EV_A2_TO_J_M2",
@@ -54,4 +62,10 @@ __all__ = [
     "transform_stress_voigt",
     "check_force_consistency",
     "check_stress_symmetry",
+    "green_lagrange_strain",
+    "strain_to_voigt",
+    "virial_to_cauchy",
+    "cauchy_to_voigt",
+    "extract",
+    "StressStrainTable",
 ]
