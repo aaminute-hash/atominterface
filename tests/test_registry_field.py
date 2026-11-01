@@ -183,18 +183,15 @@ def test_unknown_registry_names_are_rejected_with_the_vocabulary(mode):
     assert mode in text
 
 
-def test_scan_is_rejected_as_reserved_and_not_merely_unknown():
-    """``"scan"`` is the second stage, so it gets its own sentence.
+def test_scan_is_accepted_as_a_valid_registry_request():
+    """``"scan"`` is the explicit enumeration; it must pass validation.
 
-    It would build one candidate per distinguishable site and is the
-    only thing that can retire the non-(001) warning. Rejecting it as a
-    plain unknown name would leave the user unable to tell "misspelled"
-    from "not built yet".
+    It builds one candidate per distinguishable site and is the only
+    thing that can retire the non-(001) warning, so it is now a legal
+    request rather than a reserved name.
     """
     errors = CoherentInterfaceConfig(registry="scan").validate()
-    assert len(errors) == 2
-    assert "not implemented" in errors[1]
-    assert "candidate per distinguishable site" in errors[1]
+    assert errors == []
 
 
 @pytest.mark.parametrize("value", [(0.5,), (0.5, 0.5, 0.5), ()])
@@ -757,6 +754,7 @@ def _combined(result) -> str:
         (["--registry", "hcp"], "hcp"),
         (["--registry", "0.5,0.5"], (0.5, 0.5)),
         (["--registry", "0.25, -0.5"], (0.25, -0.5)),
+        (["--registry", "scan"], "scan"),
     ],
 )
 def test_cli_passes_every_spelling_through(fake_build, tmp_path, flag, expected):
@@ -814,21 +812,14 @@ def test_cli_rejects_a_site_name_it_cannot_resolve(fake_build, tmp_path):
     assert "0.5,0.5" in text
 
 
-def test_cli_rejects_scan_as_reserved_rather_than_unknown(fake_build, tmp_path):
-    """The reserved name says why it is refused, not just that it is.
-
-    Otherwise `--registry scan` reads as a typo and a user who wanted the
-    enumeration concludes it does not exist.
-    """
+def test_cli_accepts_scan(fake_build, tmp_path):
+    """``--registry scan`` is now a legal request, not a reserved typo."""
     result = runner.invoke(
         app,
         ["build", "sub.cif", "film.cif", "--registry", "scan", "--outdir", str(tmp_path)],
     )
-    assert result.exit_code == 2
-    text = _combined(result)
-    assert "not implemented" in text
-    assert "candidate per distinguishable site" in text
-    assert "auto" in text and "on-top" in text and "hcp" in text
+    assert result.exit_code == 0, _combined(result)
+    assert fake_build.config.registry == "scan"
 
 
 @pytest.mark.parametrize("flag", ["0.5", "0.5,0.5,0.5", "a,b"])

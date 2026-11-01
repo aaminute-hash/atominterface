@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `registry="scan"` builds one candidate per distinguishable high-symmetry
+  site of the surface (per match/termination), so a non-(001) gamma_int can
+  finally be quoted from an explicit scan rather than a single requested site.
+- `--max-registry-sites` caps how many sites a scan enumerates (`None` scans
+  all); it is the CLI spelling of `CoherentInterfaceConfig.max_registry_sites`.
+- `enumerate_registry_sites(sub_coords, sub_2d)` enumerates the
+  distinguishable in-plane sites of a surface in deterministic order.
+
 ## [0.5.2] - 2026-10-31
 
 ### Fixed

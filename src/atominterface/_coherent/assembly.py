@@ -248,7 +248,9 @@ def _prepare_stack(substrate_slab, film_slab, match, max_strain):
     return substrate_slab, film_slab, sub_2d, float(sub_mat[2, 2]), d_refs
 
 
-def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kwargs):
+def _assemble_interface(
+    substrate_slab, film_slab, match=None, config=None, registry=None, **kwargs
+):
     """Stack substrate and film slabs into one coherent interface.
 
     pymatgen's ``CoherentInterfaceBuilder`` triggers a full ZSL
@@ -312,7 +314,9 @@ def _assemble_interface(substrate_slab, film_slab, match=None, config=None, **kw
         sub_coords,
         film_coords,
         sub_2d,
-        getattr(config, "registry", None) if config is not None else None,
+        registry
+        if registry is not None
+        else (getattr(config, "registry", None) if config is not None else None),
     )
 
     # Rebuild both cells with a clean z axis so the vacuum budget is exact.

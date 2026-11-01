@@ -43,6 +43,7 @@ _RUN_CONFIG_KEYS = frozenset(
         "dipole_tolerance",
         "symmetric",
         "registry",
+        "max_registry_sites",
         "relax",
         "backend",
         "committee_backend",
@@ -217,6 +218,15 @@ def _optional_finite_positive(value: float | None) -> float | None:
     return _finite_positive(value)
 
 
+def _optional_int_positive(value: int | None) -> int | None:
+    """Caps ``registry="scan"`` site enumeration; ``None`` means "all"."""
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise typer.BadParameter("must be a positive integer or omitted")
+    return value
+
+
 def _registry(value: str) -> str | tuple[float, float] | None:
     """Parse a requested lateral registry: a mode name, ``u,v``, or ``none``.
 
@@ -251,16 +261,7 @@ def _registry(value: str) -> str | tuple[float, float] | None:
         if not all(math.isfinite(item) for item in parsed):
             raise typer.BadParameter(f"registry components must be finite; got {value!r}")
         return parsed
-    if text == "scan":
-        # The second stage, not this one. Saying so keeps "misspelled"
-        # distinguishable from "not built yet".
-        raise typer.BadParameter(
-            "'scan' is reserved and not implemented in this release: it would build "
-            "one candidate per distinguishable site, and it is the only thing that "
-            "would retire the non-(001) registry warning. Name a site instead -- "
-            "must be one of: " + ", ".join(REGISTRY_MODES) + ", none (or u,v, e.g. 0.5,0.5)"
-        )
-    if text not in REGISTRY_MODES:
+    if text not in REGISTRY_MODES and text != "scan":
         raise typer.BadParameter(
             "must be one of: " + ", ".join(REGISTRY_MODES) + ", none (or u,v, e.g. 0.5,0.5)"
         )
@@ -413,4 +414,5 @@ def _resolve_run_params(
         "dipole_tolerance": _finite_nonnegative(float(_pick("dipole_tolerance"))),
         "symmetric": symmetric,
         "registry": _merged_registry(_pick("registry")),
+        "max_registry_sites": _optional_int_positive(_pick("max_registry_sites")),
     }

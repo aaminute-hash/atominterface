@@ -94,6 +94,8 @@ def _warn_unscanned_orientation(
     ]
     if not off_001:
         return
+    if isinstance(registry, str) and registry == "scan":
+        return
 
     requested = _describe_registry(registry)
     as_built = (
@@ -464,6 +466,48 @@ def _sites_of_step(step: np.ndarray, count: int) -> str:
     )
 
 
+def enumerate_registry_sites(
+    sub_coords: np.ndarray, sub_2d: np.ndarray
+) -> list[tuple[float, float]]:
+    """Enumerate the distinguishable high-symmetry in-plane sites of a surface.
+
+    Returns fractional in-plane coordinates (u, v), deterministic order,
+    deduplicated after wrapping to [0, 1).  ``sub_coords`` is the substrate's
+    cartesian coordinates, ``sub_2d`` its in-plane 2x2 cell.
+    """
+    sites: list[tuple[float, float]] = [(0.0, 0.0)]
+    step = _stacking_step(sub_coords, sub_2d)
+    period = _stacking_period(step) if step is not None else 0
+    if step is not None and period >= 2:
+        for k in range(1, period):
+            wrapped = _wrap_frac(float(k) * step)
+            sites.append((float(wrapped[0]), float(wrapped[1])))
+    if period != 3:
+        for corner in ((0.5, 0.0), (0.0, 0.5), (0.5, 0.5)):
+            wrapped = _wrap_frac(np.asarray(corner, dtype=np.float64))
+            sites.append((float(wrapped[0]), float(wrapped[1])))
+
+    deduped: list[tuple[float, float]] = []
+    seen: set[tuple[int, int]] = set()
+    for site in sites:
+        wrapped = np.asarray(site, dtype=np.float64) % 1.0
+        # Snap values that differ from 0 or 1 by float scatter back to the
+        # boundary before deduplicating: ``_wrap_frac`` maps to [-1/2, 1/2],
+        # so a stacking step that reads -1.5e-16 for 0 becomes 0.999... under
+        # the modulo here, and would otherwise count as a distinct site from
+        # a corner that reads exactly 0.0.
+        wrapped = np.where(wrapped < 1e-9, 0.0, wrapped)
+        wrapped = np.where(wrapped > 1.0 - 1e-9, 0.0, wrapped)
+        key = (
+            int(round(float(wrapped[0]) * 1e9)),
+            int(round(float(wrapped[1]) * 1e9)),
+        )
+        if key not in seen:
+            seen.add(key)
+            deduped.append((float(wrapped[0]), float(wrapped[1])))
+    return deduped
+
+
 def _registry_target_frac(
     sub_coords: np.ndarray, sub_2d: np.ndarray, mode: str | Sequence[float]
 ) -> np.ndarray | None:
@@ -618,16 +662,10 @@ def _registry_errors(value: str | tuple[float, float] | list[float] | None) -> l
     """
     if isinstance(value, str):
         errors: list[str] = []
-        if value not in REGISTRY_MODES:
+        if value not in REGISTRY_MODES and value != "scan":
             errors.append(
                 f"registry must be one of {list(REGISTRY_MODES)}, or a (u, v) explicit "
                 f"fractional in-plane offset, or None; got {value!r}"
-            )
-        if value == "scan":
-            errors.append(
-                "registry='scan' is reserved for a later release: it will build one "
-                "candidate per distinguishable site of the surface. It is not "
-                "implemented yet, so it cannot be requested"
             )
         return errors
     if value is None:
