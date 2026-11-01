@@ -101,10 +101,12 @@ shown to be independent of the entry point (initial gap 2.0 → 2.4 Å moves
   moves from 0.5952 to 0.0881 and the archived ridge rows are pre-fix
   records; `registry=None` is the way to ask for the 0.4.1 cut back.
 
-  **Still open:** `registry="scan"` (§10 of the design) — the explicit
-  enumeration of every site of the surface, which is the only thing that
-  would retire the non-(001) warning. v0.5.0 reserves the name and
-  rejects it.
+  **Landed:** `registry="scan"` (§10 of the design) — the explicit
+  enumeration of every distinguishable site of the surface, one candidate
+  per site (per match/termination), capped by `max_registry_sites` when
+  set. It is the only thing that retires the non-(001) warning: with
+  `registry="scan"` the warning is suppressed, with any single-site
+  request it still fires.
 
 Both orientation archives carry the same caveat: (111) and (110) have
 **no DFT cross-check** — every number there has exactly one source

@@ -3,7 +3,10 @@
 **状态**：**已在 v0.5.0 实现**（`registry` 字段、目标式摆放、三态 provenance、
 `measure_registry`、v0.5.0 采纳了 §9 把默认值设为 `auto`）。本文件按其撰写，
 下文保留提案时的措辞作为设计依据，不要再当作"尚未实现"。
-**§10 的 `registry="scan"` 仍未实现**：名字已被保留并在校验时带说明拒绝。
+**§10 的 `registry="scan"` 已实现（本周期落地）**：`registry="scan"` 一次构建
+每位点一个 candidate（每 (match, termination) 组合），`max_registry_sites` 封顶；
+它是唯一真正撤掉 non-(001) 告警的请求。枚举 helper 为
+`enumerate_registry_sites(sub_coords, sub_2d)`。
 针对 **v0.4.1** 撰写，目标 0.5.0。
 **一句话**：让用户可以**请求**一个界面注册位点，并把"请求了什么、实际摆在哪、松弛后停在哪"三件事都记进 provenance。
 
