@@ -754,6 +754,7 @@ def _combined(result) -> str:
         (["--registry", "hcp"], "hcp"),
         (["--registry", "0.5,0.5"], (0.5, 0.5)),
         (["--registry", "0.25, -0.5"], (0.25, -0.5)),
+        (["--registry", "scan"], "scan"),
     ],
 )
 def test_cli_passes_every_spelling_through(fake_build, tmp_path, flag, expected):
@@ -811,21 +812,14 @@ def test_cli_rejects_a_site_name_it_cannot_resolve(fake_build, tmp_path):
     assert "0.5,0.5" in text
 
 
-def test_cli_rejects_scan_as_reserved_rather_than_unknown(fake_build, tmp_path):
-    """The reserved name says why it is refused, not just that it is.
-
-    Otherwise `--registry scan` reads as a typo and a user who wanted the
-    enumeration concludes it does not exist.
-    """
+def test_cli_accepts_scan(fake_build, tmp_path):
+    """``--registry scan`` is now a legal request, not a reserved typo."""
     result = runner.invoke(
         app,
         ["build", "sub.cif", "film.cif", "--registry", "scan", "--outdir", str(tmp_path)],
     )
-    assert result.exit_code == 2
-    text = _combined(result)
-    assert "not implemented" in text
-    assert "candidate per distinguishable site" in text
-    assert "auto" in text and "on-top" in text and "hcp" in text
+    assert result.exit_code == 0, _combined(result)
+    assert fake_build.config.registry == "scan"
 
 
 @pytest.mark.parametrize("flag", ["0.5", "0.5,0.5,0.5", "a,b"])

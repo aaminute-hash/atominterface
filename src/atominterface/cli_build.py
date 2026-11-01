@@ -157,7 +157,16 @@ def build(
         help=(
             "Lateral registry of the join: auto, on-top, hcp, an explicit u,v "
             "offset (e.g. 0.5,0.5), or none for the pre-0.5.0 behaviour (the join "
-            "stays where the two slab cuts leave it). Names a site; it is not a scan."
+            'stays where the two slab cuts leave it). Names a site; use "scan" to '
+            "enumerate every distinguishable site."
+        ),
+    ),
+    max_registry_sites: int | None = typer.Option(
+        None,
+        "--max-registry-sites",
+        help=(
+            "With --registry scan, keep at most N sites (and thus at most N "
+            "candidates per match/termination). Default: all distinguishable sites."
         ),
     ),
     charge_tolerance: float = typer.Option(
@@ -230,6 +239,7 @@ def build(
             "dipole_tolerance": dipole_tolerance,
             "symmetric": symmetric,
             "registry": registry,
+            "max_registry_sites": max_registry_sites,
         },
     )
 
@@ -259,6 +269,7 @@ def build(
         dipole_tolerance=params["dipole_tolerance"],
         symmetric_slabs="auto" if params["symmetric"] is None else params["symmetric"],
         registry=params["registry"],
+        max_registry_sites=params["max_registry_sites"],
     )
 
     sub = _load_structure(substrate)
