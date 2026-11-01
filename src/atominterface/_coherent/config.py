@@ -104,7 +104,15 @@ class CoherentInterfaceConfig(BuilderConfig):
         disagree by a factor of 2.55 in gamma_int. Whatever is asked
         for is measured after the move and a miss is an error, never a
         silent fallback. Asking for one site is still not a registry
-        scan; ``"scan"`` is reserved for that and is rejected here.
+        scan; ``"scan"`` is now implemented and builds one candidate per
+        distinguishable site of the surface (capped by
+        ``max_registry_sites`` when set).
+
+    max_registry_sites : int or None, optional
+        Cap on the number of registry sites a ``registry="scan"`` build
+        enumerates, per (match, termination) combination. Only takes
+        effect when ``registry="scan"``; ``None`` (default) scans every
+        site.
     """
 
     substrate_miller: tuple[int, int, int] = (0, 0, 1)
@@ -128,6 +136,7 @@ class CoherentInterfaceConfig(BuilderConfig):
     min_thickness_film: float | None = None
     area_policy: str = "strict"
     registry: str | tuple[float, float] | None = "auto"
+    max_registry_sites: int | None = None
 
     def validate(self) -> list[str]:
         errors = super().validate()
@@ -160,6 +169,10 @@ class CoherentInterfaceConfig(BuilderConfig):
                 f"area_policy must be one of {list(AREA_POLICIES)}, got {self.area_policy!r}"
             )
         errors.extend(_registry_errors(self.registry))
+        if self.max_registry_sites is not None and (
+            not isinstance(self.max_registry_sites, int) or self.max_registry_sites < 1
+        ):
+            errors.append("max_registry_sites must be an int >= 1 when provided")
         return errors
 
     def slab_thicknesses(self) -> tuple[float, float]:

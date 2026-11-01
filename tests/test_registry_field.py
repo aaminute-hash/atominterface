@@ -183,18 +183,15 @@ def test_unknown_registry_names_are_rejected_with_the_vocabulary(mode):
     assert mode in text
 
 
-def test_scan_is_rejected_as_reserved_and_not_merely_unknown():
-    """``"scan"`` is the second stage, so it gets its own sentence.
+def test_scan_is_accepted_as_a_valid_registry_request():
+    """``"scan"`` is the explicit enumeration; it must pass validation.
 
-    It would build one candidate per distinguishable site and is the
-    only thing that can retire the non-(001) warning. Rejecting it as a
-    plain unknown name would leave the user unable to tell "misspelled"
-    from "not built yet".
+    It builds one candidate per distinguishable site and is the only
+    thing that can retire the non-(001) warning, so it is now a legal
+    request rather than a reserved name.
     """
     errors = CoherentInterfaceConfig(registry="scan").validate()
-    assert len(errors) == 2
-    assert "not implemented" in errors[1]
-    assert "candidate per distinguishable site" in errors[1]
+    assert errors == []
 
 
 @pytest.mark.parametrize("value", [(0.5,), (0.5, 0.5, 0.5), ()])

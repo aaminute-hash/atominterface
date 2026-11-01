@@ -104,5 +104,7 @@ AREA_POLICIES: tuple[str, ...] = ("strict", "substrate", "film")
 #: general name parser can exist. What is offered instead is the small
 #: set that can always be *computed*, plus an explicit ``(u, v)`` for
 #: everything else, and every rejected name is answered with the list
-#: rather than guessed at.
+#: rather than guessed at.  ``"scan"`` is deliberately absent too: it is
+#: a scan instruction ("build one candidate per site"), not a single-site
+#: mode, so :func:`_registry_target_frac` never has to parse it as one.
 REGISTRY_MODES: tuple[str, ...] = ("auto", "on-top", "hcp")
