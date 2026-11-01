@@ -39,12 +39,11 @@ cannot expose.
 | run | Cu fcc 256 atoms (4×4×4), NVT 300 K | Cu fcc 32 atoms (2×2×2), BOMD NVT 300 K |
 | potential | Mishin EAM (`Cu_mishin1.eam.alloy`) | GTH-PBE-q11 + DZVP-MOLOPT-SR-GTH |
 | cell | 14.46 Å cubic (fixed) | 7.23 Å cubic (fixed) |
-| frames | 81 dump (step 2000→10000) + 101 thermo | 15 (step 0→14; job pulled mid-run) |
+| frames | 81 dump (step 2000→10000) + 101 thermo | 61 (step 0→60; complete 60-step run) |
 | stress source | thermo `pxx..pyz` (bar) | `.stress` (bar) |
 
-The CP2K job was still running when its files were pulled, so its xyz trajectory
-(17 frames) was two steps ahead of `.stress`/`.cell` (15). The bridge skips
-xyz frames that lack matching stress/cell, so 15 complete frames are used.
+The CP2K run completed all 60 BOMD steps (job 126555095, exit 0, 1:19:04), so
+its `.stress`/`.cell`/`.ener` and `pos-1.xyz` are fully aligned at 61 frames.
 
 ---
 
@@ -69,23 +68,25 @@ The kinetic term checks independently against the ideal-gas estimate
 
 | quantity | value |
 |---|---|
-| bridged frames | 15 (all have stress) |
-| temperature (from `.ener`) | mean 293.6 K |
-| mean Cauchy hydrostatic stress | **−4.7732 GPa** (tension positive) |
-| direct `.stress` mean hydro | 47732 bar → −4.773 GPa |
-| max \|bridge − direct\| over 15 frames | **1.78e-15 GPa** |
+| bridged frames | 61 (all have stress) |
+| temperature (from `.ener`) | mean 227.9 K |
+| mean Cauchy hydrostatic stress | **−5.1684 GPa** (tension positive) |
+| direct `.stress` mean hydro | 51684 bar → −5.1684 GPa |
+| max \|bridge − direct\| over 61 frames | **1.78e-15 GPa** |
 
 The CP2K run is more compressive than the LAMMPS one because its cell is frozen
 at 7.23 Å (2×3.615 Å), below the GTH-PBE equilibrium lattice constant — a
 fixed-cell NVT artefact, not a bridge error; the sign/unit path is what is
-being validated and it is exact.
+being validated and it is exact. Its 32-atom temperature average is 227.9 K
+(large finite-size fluctuation around the 300 K set point), expected for such
+a small cell.
 
 ---
 
 ## 4. `extract()` integration
 
 Feeding the bridged frames straight into `extract()` reproduces the same
-Cauchy-stress Voigt channel (mean hydro −1.9080 GPa / −4.7732 GPa), with
+Cauchy-stress Voigt channel (mean hydro −1.9080 GPa / −5.1684 GPa), with
 `has_stress` true on every frame and temperature 297.0 K for LAMMPS (CP2K
 carries no velocities, so its temperature is `atoms.info["temperature"]` and
 `extract` reports no temperature channel for it).
