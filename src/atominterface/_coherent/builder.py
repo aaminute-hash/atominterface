@@ -19,6 +19,7 @@ from atominterface._coherent.assembly import (
     _assemble_interface,
     _make_slabs,
     _prepare_charge_structure,
+    _prepare_stack,
 )
 from atominterface._coherent.cells import (
     _format_matrix,
@@ -34,6 +35,7 @@ from atominterface._coherent.placement import (
     _registry_as_json,
     _registry_lateral_ang,
     _warn_unscanned_orientation,
+    enumerate_registry_sites,
 )
 from atominterface.builders.base import BuilderConfig, Candidate, InterfaceBuilder
 from atominterface.builders.charge import (
@@ -482,12 +484,32 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
         for match in matches:
             for sub_idx, sub_slab in slabs[0]:
                 for film_idx, film_slab in slabs[1]:
-                    candidate = self._build_candidate(match, sub_idx, sub_slab, film_idx, film_slab)
-                    if candidate is not None and self._accept_charge(candidate):
-                        candidates.append(candidate)
-                    if len(candidates) >= self.config.max_candidates:
-                        self.last_build_report["stopped_at_limit"] = True
-                        return candidates
+                    if self.config.registry == "scan":
+                        sub_replicated, _, sub_2d, _, _ = _prepare_stack(
+                            sub_slab, film_slab, match, self.config.max_strain
+                        )
+                        sub_coords = np.asarray(sub_replicated.cart_coords, dtype=np.float64).copy()
+                        sites = enumerate_registry_sites(sub_coords, sub_2d)
+                        if self.config.max_registry_sites is not None:
+                            sites = sites[: self.config.max_registry_sites]
+                        for site in sites:
+                            candidate = self._build_candidate(
+                                match, sub_idx, sub_slab, film_idx, film_slab, registry=site
+                            )
+                            if candidate is not None and self._accept_charge(candidate):
+                                candidates.append(candidate)
+                            if len(candidates) >= self.config.max_candidates:
+                                self.last_build_report["stopped_at_limit"] = True
+                                return candidates
+                    else:
+                        candidate = self._build_candidate(
+                            match, sub_idx, sub_slab, film_idx, film_slab
+                        )
+                        if candidate is not None and self._accept_charge(candidate):
+                            candidates.append(candidate)
+                        if len(candidates) >= self.config.max_candidates:
+                            self.last_build_report["stopped_at_limit"] = True
+                            return candidates
         return candidates
 
     @staticmethod
@@ -505,14 +527,16 @@ class CoherentInterfaceBuilder(InterfaceBuilder):
                 return float(lateral)
         return None
 
-    def _build_candidate(self, match, sub_idx, sub_slab, film_idx, film_slab):
+    def _build_candidate(self, match, sub_idx, sub_slab, film_idx, film_slab, registry=None):
         report = self.last_build_report
         report["attempted"] += 1
         # Validate charge provenance outside the geometry error handler.
         for slab in (sub_slab, film_slab):
             _prepare_charge_structure(slab)
         try:
-            interface = _assemble_interface(sub_slab, film_slab, match, self.config)
+            interface = _assemble_interface(
+                sub_slab, film_slab, match, self.config, registry=registry
+            )
         except GeometryGateError:
             # A gate that is swallowed is not a gate.  Any other assembly
             # problem is specific to one candidate and is worth dropping
