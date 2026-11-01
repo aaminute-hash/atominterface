@@ -36,6 +36,10 @@ from atominterface.physics.invariants import (
     transform_forces,
     transform_stress_voigt,
 )
+from atominterface.physics.md_sources import (
+    read_cp2k_md,
+    read_lammps_md,
+)
 from atominterface.physics.stress_strain import (
     StressStrainTable,
     cauchy_to_voigt,
@@ -70,4 +74,6 @@ __all__ = [
     "export_constitutive_table",
     "extract",
     "StressStrainTable",
+    "read_cp2k_md",
+    "read_lammps_md",
 ]
