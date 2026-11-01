@@ -334,10 +334,10 @@ def test_auto_is_not_the_unfixed_path_on_110(monkeypatch):
     the (110) numbers were wrong. So the arms agreeing is not evidence
     that the new default works; only the third build is.
     """
-    from atominterface.builders import coherent
+    from atominterface._coherent import placement
 
     reference = _build((1, 1, 0), 14.4, registry=None)
-    monkeypatch.setattr(coherent, "_off_on_top_shift", lambda *a, **k: np.zeros(2))
+    monkeypatch.setattr(placement, "_off_on_top_shift", lambda *a, **k: np.zeros(2))
     unfixed = _build((1, 1, 0), 14.4, registry=None)
     monkeypatch.undo()
 
