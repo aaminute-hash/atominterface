@@ -12,11 +12,9 @@ protocol, adding:
 
 from __future__ import annotations
 
-import inspect
 import math
 import warnings
-from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,10 +41,6 @@ from atominterface.builders.charge import (
     validate_charge_options,
 )
 from atominterface.builders.registry import register_builder
-from atominterface.builders.strain import (
-    max_shear_strain,
-    max_stretch_strain,
-)
 from atominterface.physics import EV_A2_TO_J_M2
 
 if TYPE_CHECKING:
@@ -56,7 +50,6 @@ if TYPE_CHECKING:
 from atominterface._coherent._constants import (
     _PYMTG_COHERENT_BUILDER,  # noqa: F401 (re-exported for patch targets)
     _PYMTG_STRUCTURE,  # noqa: F401 (re-exported for patch targets)
-    _STRAIN_TIE_DIGITS,
     AREA_CONSERVATION_RTOL,
     AREA_POLICIES,
     INPLANE_PERIOD_RANGE,
@@ -68,6 +61,21 @@ from atominterface._coherent._util import (
     _pair_label,
     _reduced_formula,
     _to_ase,
+)
+from atominterface._coherent.cells import (
+    InterfaceAreas,  # noqa: F401 (re-exported for tests)
+    _format_matrix,
+    _lattice_area,
+    _multiplicity,
+    _scale_in_plane,
+    _strain_film_onto,
+    _supercell_transform,  # noqa: F401 (re-exported for tests)
+    interface_areas,
+)
+from atominterface._coherent.match import (
+    _fallback_matches,  # noqa: F401 (re-exported for tests)
+    _match_lattices,
+    _MatchInfo,
 )
 from atominterface._coherent.placement import (
     _check_registry_placement,  # noqa: F401 (re-exported for tests)
@@ -279,161 +287,6 @@ class CoherentInterfaceConfig(BuilderConfig):
         return substrate, film
 
 
-@dataclass
-class _MatchInfo:
-    """Lightweight container for a lattice match.
-
-    ``substrate_supercell`` / ``film_supercell`` carry the integer 2x2
-    transformation matrix of the matched supercell (rows = in-plane
-    vectors).  A plain ``(m, n)`` tuple is still accepted so hand-built
-    matches stay valid.
-    """
-
-    match_area: float
-    substrate_supercell: tuple[tuple[int, int], tuple[int, int]] | tuple[int, int]
-    film_supercell: tuple[tuple[int, int], tuple[int, int]] | tuple[int, int]
-    strain: float
-    shear_strain: float
-    rotation: np.ndarray | None = None
-    metadata: dict[str, object] = field(default_factory=dict)
-    # Matched in-plane supercell areas (Å²), *before* the film is strained
-    # onto the substrate.  They are what ``_area_ratio_ok`` already
-    # computes to bound the ratio; keeping them spares a second pass and
-    # records the pre-strain mismatch the strain then removes.
-    substrate_area: float = 0.0
-    film_area: float = 0.0
-
-
-def _lattice_area(lattice: np.ndarray) -> float:
-    """Area of the interface plane (Å²)."""
-    a = lattice[0]
-    b = lattice[1]
-    return float(np.linalg.norm(np.cross(a, b)))
-
-
-@dataclass(frozen=True)
-class InterfaceAreas:
-    """The two sides' interface areas plus the one to normalise by.
-
-    ``area_substrate`` / ``area_film`` are the in-plane areas (Å²) each
-    side actually occupies -- the pair a "bilateral" energy ledger needs
-    in order to say which side a normalisation came from.  A coherent
-    stack shares one cell, so the pair is normally equal; it diverges as
-    soon as one side is left unstrained.
-
-    ``area_used`` is the single number a downstream energy division
-    should take, resolved from ``policy``:
-
-    ``"strict"``
-        Refuse to choose when the sides disagree: ``area_used`` is NaN
-        and ``note`` reports both numbers.
-    ``"substrate"`` / ``"film"``
-        Always take that side, disagreement or not.
-
-    A geometric mean ``sqrt(a_sub * a_film)`` is deliberately **not**
-    offered.  It would turn a real mismatch into a plausible-looking
-    number, i.e. hide exactly the thing this record exists to expose.
-    """
-
-    area_substrate: float
-    area_film: float
-    area_used: float
-    consistent: bool
-    policy: str
-    note: str
-
-
-def _in_plane_vectors(lattice) -> np.ndarray:
-    """First two lattice rows as 2x3 cartesian vectors.
-
-    Accepts a 3x3 or 2x3 matrix, a 2x2 in-plane slice (padded with a
-    zero z component) or anything exposing a pymatgen-style ``matrix``.
-    """
-    matrix = getattr(lattice, "matrix", lattice)
-    mat = np.asarray(matrix, dtype=np.float64)
-    if mat.shape == (2, 2):
-        padded = np.zeros((2, 3), dtype=np.float64)
-        padded[:, :2] = mat
-        return padded
-    return mat[:2, :]
-
-
-def interface_areas(
-    substrate_lattice,
-    film_lattice,
-    *,
-    tolerance: float = 1e-6,
-    policy: str = "strict",
-) -> InterfaceAreas:
-    """Resolve the interface area of a two-sided stack.
-
-    ``tolerance`` is a *relative* window on ``abs(a_sub - a_film)``
-    against the larger of the two, so the verdict is scale-free.
-    ``policy`` must be one of :data:`AREA_POLICIES`.
-
-    Nothing here raises on a mismatch: an inconsistent pair is a fact to
-    record, and deciding what to do with such a candidate belongs to the
-    caller.  Only an unknown ``policy`` raises, because it is a
-    programming error rather than a property of the structure.
-    """
-    if policy not in AREA_POLICIES:
-        raise ValueError(f"area_policy must be one of {list(AREA_POLICIES)}, got {policy!r}")
-
-    a_sub = _lattice_area(_in_plane_vectors(substrate_lattice))
-    a_film = _lattice_area(_in_plane_vectors(film_lattice))
-    scale = max(a_sub, a_film)
-    consistent = bool(abs(a_sub - a_film) <= tolerance * scale) if scale > 0 else True
-
-    if policy == "film":
-        area_used = a_film
-    elif policy == "substrate" or consistent:
-        area_used = a_sub
-    else:
-        area_used = float("nan")
-
-    if consistent:
-        note = f"both sides {a_sub:.6g} Å²; area taken from the {policy} policy"
-    elif policy == "strict":
-        note = (
-            f"area mismatch: substrate {a_sub:.6g} Å² vs film {a_film:.6g} Å²; "
-            "no single area is valid and no average is substituted"
-        )
-    else:
-        note = (
-            f"area mismatch: substrate {a_sub:.6g} Å² vs film {a_film:.6g} Å²; "
-            f"area taken from the {policy} side by policy"
-        )
-
-    return InterfaceAreas(
-        area_substrate=a_sub,
-        area_film=a_film,
-        area_used=area_used,
-        consistent=consistent,
-        policy=policy,
-        note=note,
-    )
-
-
-def _as_pymatgen_lattice(obj):
-    """Normalize a lattice argument to a pymatgen Lattice."""
-    from pymatgen.core.lattice import Lattice  # noqa: WPS433
-
-    if isinstance(obj, Lattice):
-        return obj
-    arr = np.asarray(obj, dtype=np.float64)
-    if arr.ndim == 2 and arr.shape == (2, 2):
-        # In-plane 2x2 slice -> pad a unit vacuum vector along z.
-        mat = np.eye(3, dtype=np.float64)
-        mat[:2, :2] = arr
-        return Lattice(mat)
-    if arr.ndim == 2 and arr.shape == (2, 3):
-        # Two in-plane vectors already carrying a z component.
-        mat = np.eye(3, dtype=np.float64)
-        mat[:2, :] = arr
-        return Lattice(mat)
-    return Lattice(arr)
-
-
 def _prepare_charge_structure(structure, charges=None, oxidation_states=None):
     """Resolve on a bulk copy, before cutting or replicating any sites."""
     if not structure.is_ordered:
@@ -589,352 +442,6 @@ def _symmetric_terminations(bulk, miller, config: CoherentInterfaceConfig, min_t
         )
         for idx in range(n_cuts)
     ]
-
-
-def _supercell_transform(matrix: np.ndarray) -> tuple[tuple[int, int], tuple[int, int]]:
-    """Round a ZSL 2x2 transformation matrix to its integer form.
-
-    ZSL returns matrices whose entries are integers up to floating-point
-    noise.  Returning the rounded matrix (instead of, say, its diagonal
-    entries) keeps rotated supercells honest: a 45-degree cell has
-    off-diagonal entries that carry the whole meaning.  Use
-    :func:`_supercell_multiplicity` for the number of primitive cells it
-    contains.
-    """
-    rounded = np.rint(np.asarray(matrix, dtype=np.float64)).astype(int)
-    return (
-        (int(rounded[0, 0]), int(rounded[0, 1])),
-        (int(rounded[1, 0]), int(rounded[1, 1])),
-    )
-
-
-def _multiplicity(transform) -> int:
-    """Number of primitive cells in a supercell description.
-
-    Accepts either the integer 2x2 matrix produced by
-    :func:`_supercell_transform` or a legacy flat ``(m, n)`` pair.
-    """
-    rows = tuple(transform)
-    if len(rows) == 2 and all(np.isscalar(row) for row in rows):
-        return max(abs(int(rows[0]) * int(rows[1])), 1)
-    (a, b), (c, d) = rows
-    return max(abs(int(a) * int(d) - int(b) * int(c)), 1)
-
-
-def _format_matrix(matrix) -> str:
-    """Format a 2x2 supercell matrix as an unambiguous, filename-safe string.
-
-    The determinant alone cannot identify a supercell (det = 1, 2, 3 covers
-    both ``1x1``/``2x2``/``3x3`` diagonal cells and rotated cells such as
-    ``sqrt(2) x sqrt(2) R45deg``), which is how duplicate ``interface_id``
-    values used to collide.  The full integer matrix is written with ``_``
-    delimiters so no two distinct matrices can produce the same label
-    (``((11, 0), (0, 1))`` and ``((1, 10), (0, 1))`` stay distinguishable).
-    """
-    dense = np.rint(_dense_transform(matrix)).astype(int)
-    return "_".join(str(int(value)) for value in dense.ravel())
-
-
-def _match_lattices(
-    sub_lattice,
-    film_lattice,
-    config: CoherentInterfaceConfig,
-    strain_limit=None,
-    label: str = "",
-) -> list[_MatchInfo]:
-    """Generate coherent matches with strain filtering.
-
-    Uses :class:`pymatgen.analysis.interfaces.zsl.ZSLGenerator` when
-    available, and falls back to a minimal commensurate-search when
-    pymatgen's generator is unavailable or rejects every candidate.
-
-    Parameters
-    ----------
-    strain_limit
-        Override for ``config.max_strain``.  Pass ``math.inf`` to skip
-        strain filtering entirely -- that is how
-        :meth:`CoherentInterfaceBuilder.preview_matches` reports the best
-        geometry the pair can achieve, which is what a user needs to see
-        when a tolerance rejects everything.
-    label
-        Optional identity string of the pair being matched (e.g. the
-        two Miller index sets, which this function cannot see).  It is
-        only surfaced in the ZSL-fallback warning so the operator can
-        tell *which* pair silently changed enumeration path.
-    """
-    from pymatgen.analysis.interfaces.zsl import ZSLGenerator  # noqa: WPS433
-
-    limit = config.max_strain if strain_limit is None else float(strain_limit)
-
-    sub_lat = _as_pymatgen_lattice(sub_lattice)
-    film_lat = _as_pymatgen_lattice(film_lattice)
-
-    # In-plane vectors normal to the surface normal.  The coherent
-    # interface builder always cuts along the supplied Miller
-    # direction, so we project the first two reciprocal-lattice
-    # directions onto the surface plane.
-    sub_vecs = np.array(sub_lat.matrix[:2], dtype=np.float64)
-    film_vecs = np.array(film_lat.matrix[:2], dtype=np.float64)
-
-    # ``max_area_ratio_tol`` is a *relative* tolerance on the area ratio
-    # between the two matched supercells, so it must be derived from the
-    # configured area window -- not from ``zsl_max_area_ratio``.  The old
-    # ``zsl_max_area_ratio - 1.0`` mapping opened the search to +-300 %
-    # and cost ~5x the runtime while returning exactly the same matches,
-    # because anything that far off is rejected in the loop below anyway.
-    ratio_lo, ratio_hi = config.max_area_ratio
-    area_ratio_tol = max(ratio_hi - 1.0, 1.0 - ratio_lo)
-
-    generator = ZSLGenerator(
-        max_area_ratio_tol=area_ratio_tol,
-        max_area=int(config.max_area),
-        max_angle_tol=math.radians(config.zsl_max_angle),
-    )
-
-    # True parallelogram area |a x b|.  Using the norm of the cross product
-    # rather than the 2x2 determinant keeps the result independent of how
-    # the cell is rotated: the determinant implicitly projects a, b onto xy
-    # and under-reports any cell whose in-plane vectors are not level.
-    sub_cell_area = float(np.linalg.norm(np.cross(sub_vecs[0], sub_vecs[1])))
-    film_cell_area = float(np.linalg.norm(np.cross(film_vecs[0], film_vecs[1])))
-
-    matches: list[_MatchInfo] = []
-    try:
-        for match in generator(film_vecs, sub_vecs):
-            area = float(match.match_area)
-            if area <= 0 or area > config.max_area:
-                continue
-
-            film_t = np.asarray(match.film_transformation, dtype=np.float64)
-            sub_t = np.asarray(match.substrate_transformation, dtype=np.float64)
-
-            # ``zsl_max_area_ratio`` finally means what its docstring
-            # says: a hard bound on the supercell area ratio.
-            if not _area_ratio_ok(film_t, sub_t, film_cell_area, sub_cell_area, config):
-                continue
-
-            strain, shear = _strain_of(film_t @ film_vecs, sub_t @ sub_vecs)
-            if max(strain, shear) > limit:
-                continue
-
-            rotation = None
-            with suppress(Exception):
-                rotation = np.asarray(match.match_transformation, dtype=np.float64)
-
-            matches.append(
-                _MatchInfo(
-                    match_area=area,
-                    substrate_supercell=_supercell_transform(sub_t),
-                    film_supercell=_supercell_transform(film_t),
-                    strain=strain,
-                    shear_strain=shear,
-                    rotation=rotation,
-                    metadata={"zsl": True},
-                    substrate_area=abs(float(np.linalg.det(sub_t))) * sub_cell_area,
-                    film_area=abs(float(np.linalg.det(film_t))) * film_cell_area,
-                )
-            )
-    except Exception as exc:  # noqa: BLE001
-        # ZSL is best-effort, but the fallback below is a *different*
-        # enumeration: the matches it returns (and their strains) can
-        # differ as a whole, which silently changes physical results.
-        # Warn with an identifying label so the switch is never silent.
-        where = f" for {label}" if label else ""
-        warnings.warn(
-            f"ZSL lattice matching failed{where} "
-            f"({type(exc).__name__}: {exc}); falling back to brute-force "
-            "commensurate search -- matches and strains may differ from "
-            "the ZSL path",
-            stacklevel=2,
-        )
-
-    if not matches:
-        matches = _fallback_matches(sub_lattice, film_lattice, config, strain_limit=limit)
-
-    # ``max(strain, shear)`` is the quantity the filter actually applies,
-    # so it is also the honest ranking key.  The strain is quantised
-    # first: for a pair with identical cell shapes every integer
-    # supercell has *exactly* the same mismatch, so the raw floats differ
-    # only in the last bits and the tie-break collapsed to whichever
-    # giant supercell happened to round down.  Quantising restores the
-    # intended behaviour -- among equally good matches, prefer the
-    # smallest cell.
-    return sorted(
-        matches,
-        key=lambda m: (round(max(m.strain, m.shear_strain), _STRAIN_TIE_DIGITS), m.match_area),
-    )
-
-
-def _area_ratio_ok(
-    film_t, sub_t, film_cell_area: float, sub_cell_area: float, config: CoherentInterfaceConfig
-) -> bool:
-    """Whether the two matched supercell areas are within the ratio bound."""
-    film_area = abs(float(np.linalg.det(film_t))) * film_cell_area
-    sub_area = abs(float(np.linalg.det(sub_t))) * sub_cell_area
-    if film_area <= 0 or sub_area <= 0:
-        return False
-    ratio = max(film_area / sub_area, sub_area / film_area)
-    return bool(ratio <= config.zsl_max_area_ratio)
-
-
-def _strain_of(film_cell, sub_cell) -> tuple[float, float]:
-    """In-plane (stretch, shear) strain needed to fit the film onto the substrate.
-
-    ``film_cell`` comes first because it is the cell that gets deformed.
-
-    ``film_cell`` / ``sub_cell`` are plain arrays here: wrapping them in
-    :class:`pymatgen.core.Lattice` objects (as an earlier version did)
-    costs two full lattice constructions per candidate for no benefit,
-    and ZSL already returns hundreds of candidates.
-    """
-    strain = float(max_stretch_strain(film_cell, sub_cell))
-    shear = float(max_shear_strain(film_cell, sub_cell))
-    return strain, shear
-
-
-def _fallback_matches(
-    sub_lattice, film_lattice, config: CoherentInterfaceConfig, strain_limit=None
-):
-    """Brute-force commensurate search for small supercells.
-
-    This is intentionally simple: it scales the *film* cell by integer
-    factors ``(m, n)`` up to a small cutoff and keeps the cells that land
-    close to the substrate cell, reporting the film supercell in the
-    metadata.  It is **not** a replacement for ZSLGenerator, merely a
-    guarantee that the builder never returns an empty list when ZSL is
-    unavailable.
-    """
-    limit = config.max_strain if strain_limit is None else float(strain_limit)
-
-    matches: list[_MatchInfo] = []
-    sub_lat = _as_pymatgen_lattice(sub_lattice)
-    film_lat = _as_pymatgen_lattice(film_lattice)
-    sub_vecs = np.array(sub_lat.matrix[:2], dtype=np.float64)
-    film_vecs = np.array(film_lat.matrix[:2], dtype=np.float64)
-
-    # True area |a x b|, not the 2x2 determinant -- see ``_match_lattices``.
-    film_area = float(np.linalg.norm(np.cross(film_vecs[0], film_vecs[1])))
-    sub_cell_area = float(np.linalg.norm(np.cross(sub_vecs[0], sub_vecs[1])))
-    if film_area <= 0:
-        return []
-
-    cutoff = max(2, int(math.sqrt(config.max_area / film_area)) + 1)
-    for m in range(1, cutoff + 1):
-        for n in range(1, cutoff + 1):
-            if m * n > cutoff:
-                continue
-            area = film_area * m * n
-            if area > config.max_area:
-                continue
-            scaled = np.diag([float(m), float(n)]) @ film_vecs
-            strain, shear = _strain_of(scaled, sub_vecs)
-            if max(strain, shear) > limit:
-                continue
-            matches.append(
-                _MatchInfo(
-                    match_area=area,
-                    substrate_supercell=((1, 0), (0, 1)),
-                    film_supercell=((m, 0), (0, n)),
-                    strain=strain,
-                    shear_strain=shear,
-                    metadata={"zsl": False, "fallback": True},
-                    substrate_area=sub_cell_area,
-                    film_area=area,
-                )
-            )
-    return matches
-
-
-def _dense_transform(transform) -> np.ndarray:
-    """2x2 float form of a supercell description."""
-    rows = tuple(transform) if transform is not None else ()
-    if len(rows) == 2 and all(np.isscalar(row) for row in rows):
-        return np.diag([float(rows[0]), float(rows[1])])
-    return np.asarray(rows, dtype=np.float64)
-
-
-def _scale_in_plane(structure, transform):
-    """Replicate a slab by its integer in-plane supercell.
-
-    Two guards matter here:
-
-    * the third row of the scaling matrix is fixed to 1 so the slab
-      thickness (and hence the vacuum budget) is untouched;
-    * the slab is copied before scaling.  Newer pymatgen versions default
-      ``make_supercell`` to ``in_place=True``, which silently turned the
-      candidate loop into a compounding supercell (6.5 -> 85 -> 1104 A^2
-      within four candidates) because every candidate re-scaled the same
-      slab object.
-    """
-    mat = np.rint(_dense_transform(transform)).astype(int)
-    scaling = np.array(
-        [
-            [mat[0, 0], mat[0, 1], 0],
-            [mat[1, 0], mat[1, 1], 0],
-            [0, 0, 1],
-        ],
-        dtype=int,
-    )
-    slab = structure.copy()
-    if "in_place" in inspect.signature(slab.make_supercell).parameters:
-        slab = slab.make_supercell(scaling, in_place=False)
-    else:
-        slab = slab.make_supercell(scaling)
-    # Slab.copy() in some pymatgen versions preserves site properties but
-    # drops Structure.properties, including the finite-slab provenance.
-    slab.properties.update(structure.properties)
-    return slab
-
-
-def _strain_film_onto(film_slab, substrate_slab_2d):
-    """Strain ``film_slab`` in-plane onto the substrate cell.
-
-    Returns a new ``Structure`` whose in-plane lattice *is*
-    ``substrate_slab_2d`` and whose cartesian coordinates carry the
-    matching deformation ``sub_2d @ inv(film_2d)`` applied to the
-    in-plane components (``coords @ deformation.T``).  Because the same
-    map acts on the coordinates and on the cell, the fractional
-    coordinates -- the stacking sequence -- are preserved.
-
-    Shared by :func:`_assemble_interface` and :func:`reference_slabs`
-    so an interface and the reference boards it is referenced against
-    are strained by one implementation, not two approximations.  The
-    slab's vacuum column along z is carried over untouched and the
-    input is never modified.
-    """
-    from pymatgen.core import Structure
-    from pymatgen.core.lattice import Lattice as _Lattice
-
-    film_mat = np.asarray(film_slab.lattice.matrix, dtype=np.float64)
-    # ``[:2, :2]`` is the true in-plane block because the z components of a
-    # and b are zero -- guaranteed by ``_orient_slab`` for every slab that
-    # comes out of :func:`_get_terminations`.
-    film_2d = np.asarray(film_mat[:2, :2], dtype=np.float64)
-    sub_2d = np.asarray(substrate_slab_2d, dtype=np.float64)
-
-    deformation = sub_2d @ np.linalg.inv(film_2d)
-    coords = np.asarray(film_slab.cart_coords, dtype=np.float64).copy()
-    coords[:, :2] = coords[:, :2] @ deformation.T
-
-    # Clean z axis, mirroring the cell ``_assemble_interface`` builds:
-    # the in-plane rows carry no z component and the film keeps its own
-    # vacuum column, so a strained reference board stays centred.
-    rows = np.zeros((3, 3), dtype=np.float64)
-    rows[0, :2] = sub_2d[0]
-    rows[1, :2] = sub_2d[1]
-    rows[2, 2] = film_mat[2, 2] if film_mat[2, 2] > 0 else 1.0
-
-    site_properties = {key: list(values) for key, values in film_slab.site_properties.items()}
-    strained = Structure(
-        _Lattice(rows),
-        list(film_slab.species),
-        coords,
-        coords_are_cartesian=True,
-        to_unit_cell=False,
-        site_properties=site_properties or None,
-    )
-    strained.properties.update(film_slab.properties)
-    return strained
 
 
 def _shortest_inplane_period(in_plane: np.ndarray) -> tuple[float, int, int]:
