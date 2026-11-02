@@ -45,6 +45,29 @@
   Five uniaxial-strain LAMMPS runs (Cu 256 atoms, `eps_xx ∈ {±1%, ±0.5%, 0}`)
   give `C11 = 170.01 GPa` (R² = 0.9996) from the `sigma_xx` vs `eps_xx` slope,
   within 1.2% of the experimental 168 GPa.
+- **`physics/dft_sources.py` — DFT single-point bridges.** `read_vasp`
+  (OUTCAR, energy = `sigma->0`), `read_qe` (`pw.x` stdout), `read_siesta`
+  (`.fdf` + `.out`), `read_abacus` (`STRU` + `running_scf.log`),
+  `read_gaussian` (`.log`, Hartree→eV, molecular) and
+  `read_materials_studio` (DMol3 `.car`) turn a converged DFT structure into
+  an `Atoms` carrying energy/stress/forces with the same conventions as the
+  MD bridge (stress tension-positive eV/A³, energy eV). `read_vasp` is
+  verified bit-exact against a SCNET OUTCAR (energy −809.06530057);
+  `read_siesta` is verified against a SCNET `.fdf` (C16H4) and a real
+  `RELAX.out` energy (`E_KS(eV)`); `read_abacus` is verified against a real
+  `running_scf.log` (energy is already eV, stress 3×3 kbar→eV/A³). See
+  `docs/software_support_matrix.md`.
+- **`physics/md_sources.py` — additional MD bridges.** `read_gromacs_gro`
+  (`.gro`, nm→Å), `read_dcd_md` (CHARMM/NAMD/AMBER `.dcd`, little-endian
+  `float32` frames) and `read_forcite_md` (explicit `NotImplementedError` for
+  the proprietary `.xtd` format) extend the trajectory bridge beyond LAMMPS
+  and CP2K. DCD carries no element identity or stress, so callers pass
+  `symbols` and read stress from each code's log separately.
+- **`docs/software_support_matrix.md`** — a 13-tool (7 DFT + 6 MD) support
+  matrix recording, per software, whether structure / energy / stress /
+  trajectory are read and whether the reader is verified on real SCNET data,
+  verified on synthetic data, or bridge-only (the proprietary Forcite `.xtd`
+  with no public parser).
 
 ## [0.5.2] - 2026-10-31
 
