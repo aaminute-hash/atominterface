@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use AtomInterface in your research, please cite it as below."
+title: "AtomInterface: reliable interface modeling for atomistic materials simulations"
+version: 0.6.0
+date-released: 2026-11-03
+authors:
+  - name: "Feng Qi"
+    affiliation: "Guangdong Zixiang Technology Co., Ltd."
+license: MIT
+repository-code: "https://github.com/aaminute-hash/atominterface"
+url: "https://github.com/aaminute-hash/atominterface"
+keywords:
+  - materials science
+  - interfaces
+  - machine learning
+  - atomistic simulation
+  - density functional theory
+  - molecular dynamics
+abstract: >-
+  AtomInterface is a Python middleware for building and evaluating atomistic
+  models of interfaces between two crystalline materials. It wraps ASE,
+  pymatgen, MACE and CHGNet and adds a reliability layer: coherent interface
+  enumeration, an always-on relaxation guard against out-of-distribution and
+  non-physical states, fail-closed interface-energy assembly, and a bridge that
+  normalizes the output of thirteen simulation codes to one physical convention.
