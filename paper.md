@@ -9,7 +9,7 @@ tags:
   - density functional theory
 authors:
   - name: 'Feng Qi'
-    orcid: '0000-0000-0000-0000'
+    orcid: '0009-0001-3074-8592'
     affiliation: '1'
 affiliations:
   - name: 'Guangdong Zixiang Technology Co., Ltd.'

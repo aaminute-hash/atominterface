@@ -5,6 +5,7 @@ version: 0.6.0
 date-released: 2026-11-03
 authors:
   - name: "Feng Qi"
+    orcid: "https://orcid.org/0009-0001-3074-8592"
     affiliation: "Guangdong Zixiang Technology Co., Ltd."
 license: MIT
 repository-code: "https://github.com/aaminute-hash/atominterface"
