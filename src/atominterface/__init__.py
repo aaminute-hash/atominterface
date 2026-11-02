@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 
 # ── 单一事实来源转发 ─────────────────────────────────────────
 # The physics constants and conversion helpers live in

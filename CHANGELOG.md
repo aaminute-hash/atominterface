@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-11-03
 
 ### Added
 
@@ -68,6 +68,15 @@
   trajectory are read and whether the reader is verified on real SCNET data,
   verified on synthetic data, or bridge-only (the proprietary Forcite `.xtd`
   with no public parser).
+- **Abaqus CZM codegen.** `export_czm_umat` (Abaqus/Standard, implicit) and
+  `export_czm_vumat` (Abaqus/Explicit) complement the existing
+  `export_czm_moose`. Both emit a bilinear traction-separation cohesive law
+  (loading `T = T_max * delta / delta_c`, failed past `delta_c`, fracture
+  energy `Gc = 0.5 * T_max * delta_c`) with secant damage `D = delta_max /
+  delta_c` stored in `STATEV`, completing the Phase 0.4 codegen targets.
+- **JOSS paper + citation metadata.** `paper.md`, `paper.bib`,
+  `CITATION.cff` and `CODE_OF_CONDUCT.md` for the Phase 0.5 community
+  submission.
 
 ## [0.5.2] - 2026-10-31
 
