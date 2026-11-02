@@ -159,9 +159,11 @@ bullet: `C11 = 170.01 GPa` for Cu from the `sigma_xx` vs `eps_xx` slope, within
 The "Pint unit enforcement" in the first bullet was **deliberately not
 introduced**: Cauchy stress is returned in eV/Å³ with a GPa copy, and the
 `StressStrainTable.units` dict records the labels explicitly, so no new
-runtime dependency was needed (the dependency range is frozen). Of the
-original bullets only two remain: the CZM UMAT/VUMAT codegen (MOOSE
-already ships as `export_czm_moose`) and the FEniCSx unit-cell example.
+runtime dependency was needed (the dependency range is frozen). The two
+remaining bullets are now closed: the CZM UMAT/VUMAT codegen (PR #50,
+alongside the existing `export_czm_moose`) and the FEniCSx unit-cell
+example (`examples/04_fenicsx_unit_cell.py`, whose dolfinx solve half is
+written but awaits a FEniCSx environment to run).
 
 ## Phase 0.5 — Community
 
