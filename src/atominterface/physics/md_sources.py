@@ -361,7 +361,148 @@ def read_cp2k_md(stress_path, pos_path, cell_path, ener_path=None) -> list[Atoms
     return out
 
 
+def _parse_gro(path) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Parse a GROMACS ``.gro`` structure into ``(symbols, positions, cell)``.
+
+    ``.gro`` coordinates and box are in nm; both are scaled to Angstrom.  The
+    atom/residue name column is returned as a best-effort symbol (it is not a
+    standard element symbol in many force fields), so callers that know the
+    element identities should pass them explicitly.
+    """
+    lines = Path(path).read_text().splitlines()
+    natoms = int(lines[1].split()[0])
+    symbols: list[str] = []
+    positions = np.empty((natoms, 3))
+    for a in range(natoms):
+        parts = lines[2 + a].split()
+        # columns: resid resname atomname atomnum x y z (x y z are last three)
+        symbols.append(parts[1])
+        positions[a] = [float(parts[-3]), float(parts[-2]), float(parts[-1])]
+    box = [float(x) for x in lines[2 + natoms].split()]
+    if len(box) == 3:
+        cell = np.diag(box)  # orthorhombic shorthand (v1x v2y v3z)
+    elif len(box) == 9:
+        cell = np.array(box).reshape(3, 3)
+    else:
+        raise ValueError(f"malformed .gro box line: {len(box)} values")
+    return symbols, positions * 10.0, cell * 10.0  # nm -> Angstrom
+
+
+def read_gromacs_gro(gro_path, symbols=None) -> Atoms:
+    """Read a GROMACS ``.gro`` structure file into an ``Atoms``.
+
+    ``.gro`` is a single-frame structure format (trajectories are ``.trr`` /
+    ``.xtc``, which need ``gmx trjconv``); this reader covers the structure
+    half, which is what the interface builders consume.  Coordinates and box
+    are converted nm -> Angstrom.
+
+    Args:
+        gro_path: Path to the ``.gro`` file.
+        symbols: Optional per-atom element symbols (recommended, since the
+            ``.gro`` residue/atom-name columns are not reliable element
+            symbols).  When omitted the residue name is used.
+
+    Returns:
+        ``Atoms`` with the structure (no calculator results).
+    """
+    resname, positions, cell = _parse_gro(gro_path)
+    atoms = Atoms(symbols=symbols or resname, positions=positions, cell=cell, pbc=True)
+    return atoms
+
+
+def _parse_dcd_header(data: bytes) -> tuple[int, bool]:
+    """Return ``(n_frames, has_unit_cell)`` from a DCD header.
+
+    DCD is Fortran unformatted sequential: each record is ``int32 size +
+    payload + int32 size``.  The header payload is 84 bytes: ``'CORD'``
+    followed by 20 little-endian ``int32`` values; ``NSET`` (frame count) is
+    the second, and the unit-cell flag is ``int32[10]`` (offset 40) in the
+    CHARMM/NAMD layout.
+    """
+    import struct
+
+    nset = struct.unpack_from("<i", data, 8)[0]  # payload offset 4 + 4-byte marker
+    # unit-cell flag is int32[10] (payload offset 40), so file offset 44.
+    has_cell = struct.unpack_from("<i", data, 44)[0] != 0
+    return nset, has_cell
+
+
+def read_dcd_md(dcd_path, symbols, natoms=None) -> list[Atoms]:
+    """Read a CHARMM/NAMD/AMBER ``.dcd`` trajectory into ASE frames.
+
+    ``.dcd`` carries no element identity and no stress, so the caller supplies
+    the per-atom symbols (``natoms`` defaults to ``len(symbols)``).  Coordinates
+    are read as little-endian ``float32``; when the header declares a unit cell,
+    the per-frame 6-double cell record is read and stored in
+    ``atoms.info["dcd_cell"]`` (raw ``a, b, c, alpha, beta, gamma``-style values
+    -- the exact ordering is force-field specific and left to the caller).
+
+    Args:
+        dcd_path: Path to the ``.dcd`` file.
+        symbols: Per-atom element symbols.
+        natoms: Number of atoms (default ``len(symbols)``).
+
+    Returns:
+        One ``Atoms`` per frame (positions only; stress is not part of DCD).
+    """
+    import struct
+
+    data = Path(dcd_path).read_bytes()
+    n_frames, has_cell = _parse_dcd_header(data)
+    n_atoms = natoms if natoms is not None else len(symbols)
+    if n_atoms <= 0:
+        raise ValueError("DCD needs a positive atom count")
+
+    offset = 4 + 84 + 4  # skip the header record
+    frames: list[Atoms] = []
+    for _ in range(n_frames):
+        cell_values = None
+        if has_cell:
+            rec_len = struct.unpack_from("<i", data, offset)[0]
+            offset += 4
+            if rec_len == 48:  # 6 float64
+                cell_values = struct.unpack_from("<6d", data, offset)
+                offset += 48
+                offset += 4  # trailing record marker
+            else:
+                raise ValueError("expected 48-byte unit-cell record in DCD")
+        rec_len = struct.unpack_from("<i", data, offset)[0]
+        offset += 4
+        expected = n_atoms * 12  # n_atoms * 3 * float32
+        if rec_len != expected:
+            raise ValueError(
+                f"DCD frame record is {rec_len} bytes, expected {expected} for {n_atoms} atoms"
+            )
+        coords = struct.unpack_from(f"<{n_atoms * 3}f", data, offset)
+        offset += expected
+        offset += 4  # trailing record marker
+        positions = np.array(coords, dtype=float).reshape(n_atoms, 3)
+        atoms = Atoms(symbols=symbols, positions=positions, pbc=has_cell)
+        if cell_values is not None:
+            atoms.info["dcd_cell"] = list(cell_values)
+        frames.append(atoms)
+    return frames
+
+
+def read_forcite_md(*args, **kwargs) -> list[Atoms]:
+    """Materials Studio Forcite trajectories are not directly readable.
+
+    Forcite stores trajectories in the proprietary ``.xtd`` binary format,
+    which has no public parser.  Export the trajectory from Materials Studio as
+    an ``.arc`` (Accelrys text) or ``.cif``/``.xyz`` file and read that with the
+    corresponding reader instead.  This function exists to make the support
+    matrix explicit rather than silently failing on a binary blob.
+    """
+    raise NotImplementedError(
+        "Forcite .xtd is a proprietary binary format; export .arc/.cif/.xyz "
+        "from Materials Studio and read that instead"
+    )
+
+
 __all__ = [
     "read_cp2k_md",
+    "read_dcd_md",
+    "read_forcite_md",
+    "read_gromacs_gro",
     "read_lammps_md",
 ]
