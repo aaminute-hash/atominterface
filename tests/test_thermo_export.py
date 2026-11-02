@@ -1,9 +1,15 @@
 """Tests for thermodynamics and FEM export."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from atominterface.export.czm_fem import export_czm_moose
+from atominterface.export.czm_fem import (
+    export_czm_moose,
+    export_czm_umat,
+    export_czm_vumat,
+)
 from atominterface.thermo import (
     fit_cohesive_zone,
     interface_energy,
@@ -84,3 +90,31 @@ def test_export_czm_moose_writes_file(tmp_path):
     text = p.read_text()
     assert "CohesiveZoneMasterMaterial" in text
     assert "1.200000e+09" in text
+
+
+def test_export_czm_umat_writes_file(tmp_path):
+    params = {"max_traction": 1.2e9, "critical_separation": 2.5e-9, "fracture_energy": 1.5}
+    p = export_czm_umat(params, interface_id="li_llzo", out_path=tmp_path / "umat.f")
+    assert isinstance(p, Path)
+    assert p.exists()
+    text = p.read_text()
+    assert "SUBROUTINE UMAT(" in text
+    assert "END" in text
+    assert "1.200000e+09" in text
+    assert "2.500000e-09" in text
+    assert "1.500000e+00" in text
+    assert "Gc = 0.5 * max_traction * critical_separation" in text
+
+
+def test_export_czm_vumat_writes_file(tmp_path):
+    params = {"max_traction": 1.2e9, "critical_separation": 2.5e-9, "fracture_energy": 1.5}
+    p = export_czm_vumat(params, interface_id="li_llzo", out_path=tmp_path / "vumat.f")
+    assert isinstance(p, Path)
+    assert p.exists()
+    text = p.read_text()
+    assert "SUBROUTINE VUMAT(" in text
+    assert "END" in text
+    assert "1.200000e+09" in text
+    assert "2.500000e-09" in text
+    assert "1.500000e+00" in text
+    assert "Gc = 0.5 * max_traction * critical_separation" in text

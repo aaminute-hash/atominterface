@@ -20,7 +20,11 @@ LLM agent.
 - Better error messages when pymatgen's interface builder disagrees
   with the user's chemical intuition
 
-## Phase 0.3 — A real interface, end to end (current)
+## Phase 0.3 — A real interface, end to end (done)
+
+**Done.** Cu/Ni was chosen and delivered end to end: the (001) technical
+note with a VASP plane-wave cross-check, the 10-candidate table, and the
+(111)/(110) orientation archives are all landed and closed below.
 
 Pick **one** system and publish both a technical note and a full
 candidate table:
@@ -134,7 +138,7 @@ Deliverables:
 - CZM codegen (UMAT / VUMAT / MOOSE) comes **after** the data pipeline
   is trusted
 
-**Status (pipeline trusted on real MD).** `physics/stress_strain.py` delivers
+**Status (data pipeline trusted, two items left).** `physics/stress_strain.py` delivers
 `extract` (per-frame Green-Lagrange strain + Cauchy stress + temperature
 from any ASE trajectory-like input), the frame-level helpers
 (`green_lagrange_strain`, `strain_to_voigt`, `virial_to_cauchy`,
@@ -155,9 +159,9 @@ bullet: `C11 = 170.01 GPa` for Cu from the `sigma_xx` vs `eps_xx` slope, within
 The "Pint unit enforcement" in the first bullet was **deliberately not
 introduced**: Cauchy stress is returned in eV/Å³ with a GPa copy, and the
 `StressStrainTable.units` dict records the labels explicitly, so no new
-runtime dependency was needed (the dependency range is frozen). CZM
-UMAT/VUMAT remains deferred, and the FEniCSx unit-cell example is still
-pending until the data pipeline is trusted.
+runtime dependency was needed (the dependency range is frozen). Of the
+original bullets only two remain: the CZM UMAT/VUMAT codegen (MOOSE
+already ships as `export_czm_moose`) and the FEniCSx unit-cell example.
 
 ## Phase 0.5 — Community
 
@@ -178,28 +182,18 @@ again, in case new code has started using it in the meantime). The
 dependency range in `pyproject.toml` is frozen for this cycle and was
 not touched.
 
-## Monolith split candidates (recorded 2026-10-31, next-cycle P1 candidates)
+## Monolith split (done — PR #40–44)
 
-Two modules have grown past the size where a single review can hold them,
-and both now have clear cut lines.  Recorded here so the boundary work has
-a spec to start from; neither is scheduled for this cycle.
+The R10 module split has landed: `builders/coherent.py` is now the
+`_coherent/` subpackage and `builders/charge.py` the `_charge/` subpackage.
+See `src/atominterface/_coherent/` and `src/atominterface/_charge/`.
 
-- `src/atominterface/builders/coherent.py` (2700+ lines).  Candidate
-  cuts, in dependency order: the `_match_lattices` family (ZSL wrapping,
-  area/strain filtering, `_area_ratio_ok`, `_strain_of`), the
-  `_fallback_matches` brute-force search, the `CoherentInterfaceBuilder`
-  class itself, and the remaining misc helpers (`_reduced_formula`,
-  `_format_matrix`, ...).  The module-level pymatgen bindings
-  (`_PYMTG_COHERENT_BUILDER` etc.) must move with whatever imports them,
-  and tests patch `atominterface.builders.coherent.ZSLGenerator`-style
-  names, so a split needs to keep those patch points importable from a
-  stable location.
-- `src/atominterface/builders/charge.py` (932 lines).  Candidate cut:
-  termination sampling vs. the builder/polarity analysis.
+## 13-software reader bridge (done — PR #49)
 
-One small silent-fallback in `coherent.py` is deliberately *not* touched
-this cycle and belongs to the split instead: the
-`with suppress(Exception): rotation = ...` around a single match's
-rotation parsing (~line 887).  It only degrades one match's local
-attribute, not the enumeration path, so widening it now would grow the
-regression surface of this cycle for little gain.
+A user-driven extension outside the roadmap: `physics/dft_sources.py` and
+`physics/md_sources.py` now bridge 13 simulation codes (7 DFT + 6 MD) into
+the extract pipeline — VASP, Quantum ESPRESSO, SIESTA, ABACUS, CP2K,
+Gaussian and Materials Studio on the DFT side; LAMMPS, GROMACS, NAMD,
+AMBER, CHARMM and Forcite on the MD side. Per-software coverage
+(structure / energy / stress / trajectory, and verified vs. synthetic vs.
+bridge-only) is recorded in `docs/software_support_matrix.md`.
