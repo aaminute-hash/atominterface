@@ -134,7 +134,7 @@ Deliverables:
 - CZM codegen (UMAT / VUMAT / MOOSE) comes **after** the data pipeline
   is trusted
 
-**Status (step one, landed).** `physics/stress_strain.py` now delivers
+**Status (pipeline trusted on real MD).** `physics/stress_strain.py` delivers
 `extract` (per-frame Green-Lagrange strain + Cauchy stress + temperature
 from any ASE trajectory-like input), the frame-level helpers
 (`green_lagrange_strain`, `strain_to_voigt`, `virial_to_cauchy`,
@@ -142,6 +142,15 @@ from any ASE trajectory-like input), the frame-level helpers
 constitutive table). The invariance half of the second bullet is covered in
 `tests/test_stress_strain.py` — rigid-rotation stress invariance, Voigt
 round-trips, and hand-computed uniaxial / shear strain.
+
+`physics/md_sources.py` now bridges *real* MD trajectories into the pipeline:
+`read_lammps_md` and `read_cp2k_md` turn LAMMPS / CP2K output into
+`list[ase.Atoms]` carrying the full Cauchy stress. Two real-data validations
+landed on SCNET data — `docs/validation_md_virial_cauchy.md` (the sign/unit/
+kinetic-term conventions, frame-by-frame to ≤ 7e-16 GPa) and
+`docs/validation_md_elastic_constant.md` (the small-strain half of the second
+bullet: `C11 = 170.01 GPa` for Cu from the `sigma_xx` vs `eps_xx` slope, within
+1.2% of the experimental 168 GPa).
 
 The "Pint unit enforcement" in the first bullet was **deliberately not
 introduced**: Cauchy stress is returned in eV/Å³ with a GPa copy, and the

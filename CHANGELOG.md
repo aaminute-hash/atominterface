@@ -39,7 +39,12 @@
   `pxx..pyz`, CP2K `.stress`) rather than rebuilding a virial from
   coordinates. LAMMPS velocities are converted A/ps -> ASE via
   `sqrt(mvv2e)`. See `docs/validation_md_virial_cauchy.md` for the
-  frame-by-frame real-data cross-check.
+  frame-by-frame real-data cross-check (LAMMPS 81 frames + CP2K 61 frames,
+  bit-for-bit to ≤ 7e-16 GPa).
+- **`docs/validation_md_elastic_constant.md` — elastic-constant extraction.**
+  Five uniaxial-strain LAMMPS runs (Cu 256 atoms, `eps_xx ∈ {±1%, ±0.5%, 0}`)
+  give `C11 = 170.01 GPa` (R² = 0.9996) from the `sigma_xx` vs `eps_xx` slope,
+  within 1.2% of the experimental 168 GPa.
 
 ## [0.5.2] - 2026-10-31
 
