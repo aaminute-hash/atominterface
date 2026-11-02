@@ -27,6 +27,14 @@ BOHR_TO_ANG = 0.529177210903
 ANG_TO_BOHR = 1.0 / BOHR_TO_ANG
 
 # ── 导出 ──────────────────────────────────────────────────────
+from atominterface.physics.dft_sources import (
+    read_abacus,
+    read_gaussian,
+    read_materials_studio,
+    read_qe,
+    read_siesta,
+    read_vasp,
+)
 from atominterface.physics.invariants import (
     check_force_consistency,
     check_stress_symmetry,
@@ -38,6 +46,9 @@ from atominterface.physics.invariants import (
 )
 from atominterface.physics.md_sources import (
     read_cp2k_md,
+    read_dcd_md,
+    read_forcite_md,
+    read_gromacs_gro,
     read_lammps_md,
 )
 from atominterface.physics.stress_strain import (
@@ -76,4 +87,13 @@ __all__ = [
     "StressStrainTable",
     "read_cp2k_md",
     "read_lammps_md",
+    "read_dcd_md",
+    "read_gromacs_gro",
+    "read_forcite_md",
+    "read_vasp",
+    "read_qe",
+    "read_siesta",
+    "read_abacus",
+    "read_gaussian",
+    "read_materials_studio",
 ]
