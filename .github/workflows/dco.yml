@@ -1,0 +1,86 @@
+name: DCO
+
+# The CLA is accepted by signing off commits (see CONTRIBUTING.md and
+# CLA-Individual.md). That makes the sign-off the legal record, so it has to be
+# enforced mechanically rather than trusted: a merged commit without it
+# permanently locks that code out of the commercial edition.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  signoff:
+    name: Every commit signed off
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Signed-off-by on all commits in this pull request
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - "$BASE_REF" "$HEAD_SHA" <<'PY'
+          import re
+          import subprocess
+          import sys
+
+          base_ref, head_sha = sys.argv[1], sys.argv[2]
+
+          subprocess.run(
+              ["git", "fetch", "--no-tags", "origin", base_ref],
+              check=True,
+          )
+          merge_base = subprocess.run(
+              ["git", "merge-base", f"origin/{base_ref}", head_sha],
+              check=True, capture_output=True, text=True,
+          ).stdout.strip()
+
+          shas = subprocess.run(
+              ["git", "rev-list", f"{merge_base}..{head_sha}"],
+              check=True, capture_output=True, text=True,
+          ).stdout.split()
+
+          # "Signed-off-by: Name <email>" — the name may not be empty and the
+          # address must look like an address, otherwise a bare
+          # "Signed-off-by: x" could be pasted in to satisfy the check.
+          pattern = re.compile(
+              r"^Signed-off-by:\s+\S.*<[^<>@\s]+@[^<>@\s]+>\s*$",
+              re.MULTILINE,
+          )
+
+          offenders = []
+          for sha in shas:
+              message = subprocess.run(
+                  ["git", "log", "-1", "--format=%B", sha],
+                  check=True, capture_output=True, text=True,
+              ).stdout
+              if not pattern.search(message):
+                  subject = subprocess.run(
+                      ["git", "log", "-1", "--format=%s", sha],
+                      check=True, capture_output=True, text=True,
+                  ).stdout.strip()
+                  offenders.append((sha[:12], subject))
+
+          if offenders:
+              print(f"::error::{len(offenders)} commit(s) lack a Signed-off-by line.")
+              for sha, subject in offenders:
+                  print(f"  {sha}  {subject}")
+              print()
+              print("The sign-off is how you accept CLA-Individual.md, so it")
+              print("cannot be waived. Amend the commits with:")
+              print()
+              print("    git rebase --signoff origin/%s" % base_ref)
+              print()
+              print("then force-push the branch.")
+              sys.exit(1)
+
+          print(f"All {len(shas)} commit(s) signed off.")
+          PY
