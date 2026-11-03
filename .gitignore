@@ -93,6 +93,7 @@ docs/cpc_paper.md
 docs/cpc_revision_plan.md
 docs/validation_ood_guard.md
 docs/validation/ood_guard/
+docs/figures/
 
 # OS
 .DS_Store
