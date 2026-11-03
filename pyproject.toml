@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "AtomInterface contributors"}
+    {name = "Feng Qi"}
 ]
 keywords = ["materials-science", "interface", "mlip", "ase", "pymatgen", "active-learning"]
 classifiers = [
