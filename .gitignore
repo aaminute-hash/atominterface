@@ -87,6 +87,13 @@ claude-local.sh
 # Local Claude Code config -- local-only, never commit
 CLAUDE.md
 
+# Local-only drafts (CPC paper + revision plan + OOD validation notes)
+# Kept locally until submission; do not commit to the public repository.
+docs/cpc_paper.md
+docs/cpc_revision_plan.md
+docs/validation_ood_guard.md
+docs/validation/ood_guard/
+
 # OS
 .DS_Store
 Thumbs.db
