@@ -84,6 +84,9 @@ candidates.csv
 # Local tooling -- contains a live API key, never commit
 claude-local.sh
 
+# Local Claude Code config -- local-only, never commit
+CLAUDE.md
+
 # OS
 .DS_Store
 Thumbs.db
