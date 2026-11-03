@@ -116,7 +116,10 @@ Do not change these without an explicit decision:
 - `src/atominterface/relax/` — the guarded relaxation layer. Freeze it or get
   an exemption; changes there alter what "converged" and "safe" mean.
 - dependency ranges in `pyproject.toml`
-- `LICENSE`
+- `LICENSE`, `NOTICE`, `CLA-Individual.md`, `CLA-Corporate.md` — the copyright
+  holder and the relicensing grant. These were set by the sole copyright owner
+  on 2026-11-03 (© Feng Qi, CLA in force); a change here is a change to who can
+  sell the software, so it needs the owner's written decision, not a PR review.
 
 ## Documentation and archived data
 
@@ -137,3 +140,35 @@ Do not change these without an explicit decision:
 
 By contributing you agree that your contributions are licensed under
 the project's MIT license.
+
+### Contributor License Agreement (required)
+
+The MIT license above is what users receive. It is **not** the whole
+picture for contributors, because the project also maintains a
+commercial edition built from this same codebase. To keep that
+possible, every contribution must additionally grant the Maintainer
+the right to relicense it.
+
+Before your first pull request is merged you must:
+
+1. Read and accept **[CLA-Individual.md](CLA-Individual.md)**. If you
+   contribute in the course of employment — a company, a university, a
+   national laboratory — your employer likely owns the economic rights
+   to your work, so a **[CLA-Corporate.md](CLA-Corporate.md)** must be
+   executed as well.
+2. Sign off every commit, which is how you accept the CLA:
+
+   ```bash
+   git commit -s -m "feat(relax): add committee watcher"
+   ```
+
+   This appends `Signed-off-by: Your Name <you@example.com>` and
+   certifies the Developer Certificate of Origin. A pull request whose
+   commits are not signed off will not be merged — the check is
+   automated.
+3. Add yourself to `CONTRIBUTORS.md` in the same pull request.
+
+**Why this is not optional.** Code merged without a CLA grant can never
+be included in the commercial edition, and that restriction is
+permanent: it cannot be undone by asking later, because the copyright
+stays with the contributor. Ask before you write, not after.

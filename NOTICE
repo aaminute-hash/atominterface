@@ -1,0 +1,51 @@
+AtomInterface
+Copyright (c) 2026 Feng Qi
+
+This product includes software developed as part of the AtomInterface project
+(https://github.com/aaminute-hash/atominterface).
+
+The AtomInterface source code is licensed under the MIT License. See the
+LICENSE file for the full text.
+
+--------------------------------------------------------------------------------
+THIRD-PARTY COMPONENTS
+--------------------------------------------------------------------------------
+
+AtomInterface depends on, but does not vendor or redistribute, the following
+packages. They are installed separately by the user and remain governed by
+their own licenses:
+
+  - Atomic Simulation Environment (ASE)      LGPL-2.1-or-later
+  - NumPy                                    BSD-3-Clause
+  - SciPy                                    BSD-3-Clause
+  - pymatgen (optional)                      MIT
+  - MACE / mace-torch (optional)             MIT
+  - CHGNet (optional)                        MIT
+  - PyTorch (optional, via the MLIP backends) BSD-3-Clause
+
+AtomInterface emits interface files (MOOSE input snippets, Abaqus UMAT/VUMAT
+Fortran sources, POSCAR/INCAR inputs) for use with third-party simulation
+software. No source code, header, library, or SDK belonging to Abaqus, ANSYS,
+COMSOL, MOOSE, VASP, Quantum ESPRESSO, SIESTA, ABACUS, CP2K, LAMMPS, GROMACS,
+Gaussian, Materials Studio, or Forcite is included in or redistributed with
+this product. Users are responsible for holding valid licenses for any such
+software they use.
+
+--------------------------------------------------------------------------------
+TRADEMARKS
+--------------------------------------------------------------------------------
+
+"Abaqus" is a trademark of Dassault Systèmes Simulia Corp. "ANSYS" is a
+trademark of ANSYS, Inc. "COMSOL" is a trademark of COMSOL AB. "VASP" is a
+trademark of the VASP Software GmbH. All other trademarks are the property of
+their respective owners. Use of these names is descriptive only and does not
+imply affiliation, endorsement, or sponsorship.
+
+--------------------------------------------------------------------------------
+CONTRIBUTIONS
+--------------------------------------------------------------------------------
+
+Contributions to AtomInterface are accepted under the terms of
+CLA-Individual.md (and, for contributions made on behalf of an employer,
+CLA-Corporate.md). The Maintainer retains the right to license contributed code
+under additional terms, including a commercial license. See CONTRIBUTING.md.
